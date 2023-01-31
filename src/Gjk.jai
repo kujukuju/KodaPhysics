@@ -5,58 +5,104 @@ solve_gjk :: (a: KodaVertices, b: KodaVertices, dir: Vector3) -> bool {
 }
 
 solve_gjk :: (a: KodaVertices, b: KodaVertices, dir: Vector3, simplex: *KodaVertices(4)) -> bool {
-    direction := dir;
-    support := get_support(a, b, direction);
+    search_dir := dir;
+    if search_dir == .{0, 0, 0} {
+        search_dir = a[0] - b[0];
+    }
 
-    simplex.count = 1;
-    simplex.fixed[0] = support;
+    MAX_ITERATIONS :: 64;
 
-    direction = -support;
+    simplex.count = 4;
+    simplex.fixed[2] = get_support(b, search_dir) - get_support(a, -search_dir);
+    search_dir = -simplex.fixed[2];
 
-    // I think this gets hung on non-convex shapes
-    while true {
-        support = get_support(a, b, direction);
-        
-        if dot(support, direction) <= 0 {
+    simplex.fixed[1] = get_support(b, search_dir) - get_support(a, -search_dir);
+
+    if dot(simplex.fixed[1], search_dir) < 0 {
+        return false;
+    }
+
+    search_dir = cross(cross(simplex.fixed[2] - simplex.fixed[1], -simplex.fixed[1]), simplex.fixed[2] - simplex.fixed[1]);
+    if search_dir == .{0, 0, 0} {
+        // the origin is on this line segment
+        search_dir = cross(simplex.fixed[2] - simplex.fixed[1], .{1, 0, 0});
+        if search_dir == .{0, 0, 0} {
+            search_dir = cross(simplex.fixed[2] - simplex.fixed[1], .{0, 0, -1});
+        }
+    }
+
+    simp_dim := 2;
+
+    for i: 0..MAX_ITERATIONS - 1 {
+        simplex.fixed[0] = get_support(b, search_dir) - get_support(a, -search_dir);
+        if dot(simplex.fixed[0], search_dir) < 0 {
             return false;
         }
 
-        add_front(simplex, support);
-
-        if next_simplex(simplex, *direction) {
-            return true;
+        simp_dim += 1;
+        if simp_dim == 3 {
+            simp_dim, search_dir = solve_simplex3(simplex, simp_dim, search_dir);
+        } else {
+            found: bool;
+            found, simp_dim, search_dir = solve_simplex4(simplex, simp_dim, search_dir);
+            if found {
+                return true;
+            }
         }
     }
 
     return false;
 }
 
-solve_gjk :: (a: KodaVertices, b: Vector3, dir: Vector3) -> bool {
+solve_gjk_open :: (a: KodaVertices, b: KodaVertices, dir: Vector3) -> bool {
     simplex: KodaVertices(4);
-    return solve_gjk(a, b, dir, *simplex);
+    return solve_gjk_open(a, b, dir, *simplex);
 }
 
-solve_gjk :: (a: KodaVertices, b: Vector3, dir: Vector3, simplex: *KodaVertices(4)) -> bool {
-    direction := dir;
-    support := get_support(a, b, direction);
+solve_gjk_open :: (a: KodaVertices, b: KodaVertices, dir: Vector3, simplex: *KodaVertices(4)) -> bool {
+    search_dir := dir;
+    if search_dir == .{0, 0, 0} {
+        search_dir = a[0] - b[0];
+    }
 
-    simplex.count = 1;
-    simplex.fixed[0] = support;
+    MAX_ITERATIONS :: 64;
 
-    direction = -support;
+    simplex.count = 4;
+    simplex.fixed[2] = get_support(b, search_dir) - get_support(a, -search_dir);
+    search_dir = -simplex.fixed[2];
 
-    // I think this gets hung on non-convex shapes
-    while true {
-        support = get_support(a, b, direction);
-        
-        if dot(support, direction) <= 0 {
-            return false;
+    simplex.fixed[1] = get_support(b, search_dir) - get_support(a, -search_dir);
+
+    // if dot(simplex.fixed[1], search_dir) < 0 {
+    //     return false;
+    // }
+
+    search_dir = cross(cross(simplex.fixed[2] - simplex.fixed[1], -simplex.fixed[1]), simplex.fixed[2] - simplex.fixed[1]);
+    if search_dir == .{0, 0, 0} {
+        // the origin is on this line segment
+        search_dir = cross(simplex.fixed[2] - simplex.fixed[1], .{1, 0, 0});
+        if search_dir == .{0, 0, 0} {
+            search_dir = cross(simplex.fixed[2] - simplex.fixed[1], .{0, 0, -1});
         }
+    }
 
-        add_front(simplex, support);
+    simp_dim := 2;
 
-        if next_simplex(simplex, *direction) {
-            return true;
+    for i: 0..MAX_ITERATIONS - 1 {
+        simplex.fixed[0] = get_support(b, search_dir) - get_support(a, -search_dir);
+        // if dot(simplex.fixed[0], search_dir) < 0 {
+        //     return false;
+        // }
+
+        simp_dim += 1;
+        if simp_dim == 3 {
+            simp_dim, search_dir = solve_simplex3(simplex, simp_dim, search_dir);
+        } else {
+            found: bool;
+            found, simp_dim, search_dir = solve_simplex4(simplex, simp_dim, search_dir);
+            if found {
+                return true;
+            }
         }
     }
 
@@ -65,7 +111,74 @@ solve_gjk :: (a: KodaVertices, b: Vector3, dir: Vector3, simplex: *KodaVertices(
 
 #scope_file
 
-get_furthest_point :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
+solve_simplex3 :: (simplex: *KodaVertices(4), simp_dim: int, search_direction: Vector3) -> int, Vector3 {
+    search_dir := search_direction;
+    
+    n := cross(simplex.fixed[1] - simplex.fixed[0], simplex.fixed[2] - simplex.fixed[0]);
+    ao := -simplex.fixed[0];
+
+    simp_dim = 2;
+    if dot(cross(simplex.fixed[1] - simplex.fixed[0], n), ao) > 0 {
+        simplex.fixed[2] = simplex.fixed[0];
+        search_dir = cross(cross(simplex.fixed[1] - simplex.fixed[0], ao), simplex.fixed[1] - simplex.fixed[0]);
+        return simp_dim, search_dir;
+    }
+
+    if dot(cross(n, simplex.fixed[2] - simplex.fixed[0]), ao) > 0 {
+        simplex.fixed[1] = simplex.fixed[0];
+        search_dir = cross(cross(simplex.fixed[2] - simplex.fixed[0], ao), simplex.fixed[2] - simplex.fixed[0]);
+        return simp_dim, search_dir;
+    }
+
+    simp_dim = 3;
+    if dot(n, ao) > 0 {
+        simplex.fixed[3] = simplex.fixed[2];
+        simplex.fixed[2] = simplex.fixed[1];
+        simplex.fixed[1] = simplex.fixed[0];
+        search_dir = n;
+        return simp_dim, search_dir;
+    }
+
+    simplex.fixed[3] = simplex.fixed[1];
+    simplex.fixed[1] = simplex.fixed[0];
+    search_dir = -n;
+    return simp_dim, search_dir;
+}
+
+solve_simplex4 :: (simplex: *KodaVertices(4), simp_dim: int, search_direction: Vector3) -> bool, int, Vector3 {
+    search_dir := search_direction;
+
+    abc := cross(simplex.fixed[1] - simplex.fixed[0], simplex.fixed[2] - simplex.fixed[0]);
+    acd := cross(simplex.fixed[2] - simplex.fixed[0], simplex.fixed[3] - simplex.fixed[0]);
+    adb := cross(simplex.fixed[3] - simplex.fixed[0], simplex.fixed[1] - simplex.fixed[0]);
+
+    ao := -simplex.fixed[0];
+    simp_dim = 3;
+
+    if dot(abc, ao) > 0 {
+        simplex.fixed[3] = simplex.fixed[2];
+        simplex.fixed[2] = simplex.fixed[1];
+        simplex.fixed[1] = simplex.fixed[0];
+        search_dir = abc;
+        return false, simp_dim, search_dir;
+    }
+    if dot(acd, ao) > 0 {
+        simplex.fixed[1] = simplex.fixed[0];
+        search_dir = acd;
+        return false, simp_dim, search_dir;
+    }
+    if dot(adb, ao) > 0 {
+        simplex.fixed[2] = simplex.fixed[3];
+        simplex.fixed[3] = simplex.fixed[1];
+        simplex.fixed[1] = simplex.fixed[0];
+        search_dir = adb;
+        return false, simp_dim, search_dir;
+    }
+
+    return true, simp_dim, search_dir;
+}
+
+get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
     if vertices.count == 0 {
         return .{};
     }
@@ -83,140 +196,4 @@ get_furthest_point :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
     }
 
     return largest_vertex;
-}
-
-get_support :: (a: KodaVertices, b: KodaVertices, direction: Vector3) -> Vector3 {
-    return get_furthest_point(a, direction) - get_furthest_point(b, -direction);
-}
-
-get_support :: (a: KodaVertices, b: Vector3, direction: Vector3) -> Vector3 {
-    return get_furthest_point(a, direction) - b;
-}
-
-next_simplex :: (simplex: *KodaVertices(4), direction: *Vector3) -> bool {
-    if simplex.count == {
-        case 2;
-            return next_simplex_line(simplex, direction);
-
-        case 3;
-            return next_simplex_triangle(simplex, direction);
-
-        case 4;
-            return next_simplex_tetrahedron(simplex, direction);
-    }
-
-    return false;
-}
-
-next_simplex_line :: (simplex: *KodaVertices(4), direction: *Vector3) -> bool {
-    a := simplex.fixed[0];
-    b := simplex.fixed[1];
-
-    ab := b - a;
-    ao := -a;
-
-    if same_direction(ab, ao) {
-        << direction = cross(cross(ab, ao), ab);
-    } else {
-        simplex.fixed[0] = a;
-        simplex.count = 1;
-        << direction = ao;
-    }
-
-    return false;
-}
-
-next_simplex_triangle :: (simplex: *KodaVertices(4), direction: *Vector3) -> bool {
-    a := simplex.fixed[0];
-    b := simplex.fixed[1];
-    c := simplex.fixed[2];
-
-    ab := b - a;
-    ac := c - a;
-    ao := -a;
-
-    abc := cross(ab, ac);
-
-    if same_direction(cross(abc, ac), ao) {
-        if same_direction(ac, ao) {
-            simplex.fixed[0] = a;
-            simplex.fixed[1] = c;
-            simplex.count = 2;
-            << direction = cross(cross(ac, ao), ac);
-        } else {
-            simplex.fixed[0] = a;
-            simplex.fixed[1] = b;
-            simplex.count = 2;
-            return next_simplex_line(simplex, direction);
-        }
-    } else {
-        if same_direction(cross(ab, abc), ao) {
-            simplex.fixed[0] = a;
-            simplex.fixed[1] = b;
-            simplex.count = 2;
-            return next_simplex_line(simplex, direction);
-        } else {
-            if same_direction(abc, ao) {
-                << direction = abc;
-            } else {
-                simplex.fixed[0] = a;
-                simplex.fixed[1] = c;
-                simplex.fixed[2] = b;
-                simplex.count = 3;
-                << direction = -abc;
-            }
-        }
-    }
-
-    return false;
-}
-
-next_simplex_tetrahedron :: (simplex: *KodaVertices(4), direction: *Vector3) -> bool {
-    a := simplex.fixed[0];
-    b := simplex.fixed[1];
-    c := simplex.fixed[2];
-    d := simplex.fixed[3];
-
-    ab := b - a;
-    ac := c - a;
-    ad := d - a;
-    ao := -a;
-
-    abc := cross(ab, ac);
-    acd := cross(ac, ad);
-    adb := cross(ad, ab);
-
-    if same_direction(abc, ao) {
-        simplex.fixed[0] = a;
-        simplex.fixed[1] = b;
-        simplex.fixed[2] = c;
-        simplex.count = 3;
-        return next_simplex_triangle(simplex, direction);
-    } else if same_direction(acd, ao) {
-        simplex.fixed[0] = a;
-        simplex.fixed[1] = c;
-        simplex.fixed[2] = d;
-        simplex.count = 3;
-        return next_simplex_triangle(simplex, direction);
-    } else if same_direction(adb, ao) {
-        simplex.fixed[0] = a;
-        simplex.fixed[1] = d;
-        simplex.fixed[2] = b;
-        simplex.count = 3;
-        return next_simplex_triangle(simplex, direction);
-    }
-
-    return true;
-}
-
-same_direction :: (direction: Vector3, ao: Vector3) -> bool {
-    return dot(direction, ao) > 0;
-}
-
-add_front :: (simplex: *KodaVertices(4), v: Vector3) {
-    simplex.fixed[3] = simplex.fixed[2];
-    simplex.fixed[2] = simplex.fixed[1];
-    simplex.fixed[1] = simplex.fixed[0];
-    simplex.fixed[0] = v;
-    simplex.count = min(simplex.count + 1, 4);
 }

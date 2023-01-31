@@ -1,184 +1,236 @@
 
-// Manifold :: struct {
-
-// }
-
-solve_epa :: (a: KodaVertices, b: KodaVertices) -> Vector3, bool {
+solve_epa :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
     simplex: KodaVertices(4);
-    // TODO smarter starting direction
-    collide := solve_gjk(a, b, .{0, 0, -1}, *simplex);
-    if !collide {
-        return .{}, false;
+    inside := solve_gjk(a, b, .{}, *simplex);
+    if !inside {
+        return false, .{};
     }
 
-    polytope: KodaVertices(MAX_VERTICES * 3);
-    for i: 0..simplex.count - 1 {
-        add(*polytope, simplex[i]);
-    }
+    MAX_ITERATIONS :: 64;
+    MAX_FACES :: 64;
+    MAX_LOOSE_EDGES :: 32;
+    TOLERANCE :: 0.0001;
 
-    faces: KodaIndices;
-    add(*faces, 0, 1, 2);
-    add(*faces, 0, 3, 1);
-    add(*faces, 0, 2, 3);
-    add(*faces, 1, 3, 2);
+    faces: [64][4] Vector3;
+    faces[0][0] = simplex.fixed[0];
+    faces[0][1] = simplex.fixed[1];
+    faces[0][2] = simplex.fixed[2];
+    faces[0][3] = normalize(cross(simplex.fixed[1] - simplex.fixed[0], simplex.fixed[2] - simplex.fixed[0])); // abc
+    faces[1][0] = simplex.fixed[0];
+    faces[1][1] = simplex.fixed[2];
+    faces[1][2] = simplex.fixed[3];
+    faces[1][3] = normalize(cross(simplex.fixed[2] - simplex.fixed[0], simplex.fixed[3] - simplex.fixed[0])); // acd
+    faces[2][0] = simplex.fixed[0];
+    faces[2][1] = simplex.fixed[3];
+    faces[2][2] = simplex.fixed[1];
+    faces[2][3] = normalize(cross(simplex.fixed[3] - simplex.fixed[0], simplex.fixed[1] - simplex.fixed[0])); // adb
+    faces[3][0] = simplex.fixed[1];
+    faces[3][1] = simplex.fixed[3];
+    faces[3][2] = simplex.fixed[2];
+    faces[3][3] = normalize(cross(simplex.fixed[3] - simplex.fixed[1], simplex.fixed[2] - simplex.fixed[1])); // bdc
 
-    normals: KodaComplexNormals;
-    min_face: int;
-    normals, min_face = get_face_normals(polytope, faces);
+    num_faces := 4;
+    closest_face: int;
 
-    min_normal: Vector3;
-    min_distance := FLOAT32_MAX;
-    while min_distance == FLOAT32_MAX {
-        min_normal = normals[min_face].xyz;
-		min_distance = normals[min_face].w;
- 
-		support := get_support(a, b, min_normal);
-		s_distance := dot(min_normal, support);
- 
-        // TODO better epsilon?
-		if abs(s_distance - min_distance) > 0.001 {
-			min_distance = FLOAT32_MAX;
-            unique_edges: KodaIndices;
+    for i: 0..MAX_ITERATIONS - 1 {
+        min_dist := dot(faces[0][0], faces[0][3]);
+        closest_face = 0;
+        for i: 1..num_faces - 1 {
+            dist := dot(faces[i][0], faces[i][3]);
+            if dist < min_dist {
+                min_dist = dist;
+                closest_face = i;
+            }
+        }
 
-            check_indices(polytope, faces);
+        search_dir := faces[closest_face][3];
+        p := get_support(b, search_dir) - get_support(a, -search_dir);
 
-            i := 0;
-            while i < normals.count {
-				if same_direction(normals[i].xyz, support) {
-					f := i * 3;
+        if dot(p, search_dir) - min_dist < TOLERANCE {
+            return true, faces[closest_face][3] * dot(p, search_dir);
+        }
 
-					add_if_unique_edge(*unique_edges, faces, f, f + 1);
-					add_if_unique_edge(*unique_edges, faces, f + 1, f + 2);
-					add_if_unique_edge(*unique_edges, faces, f + 2, f);
+        loose_edges: [MAX_LOOSE_EDGES][2] Vector3;
+        num_loose_edges := 0;
 
-                    check_indices(polytope, unique_edges);
+        i := 0;
+        while i < num_faces {
+            if dot(faces[i][3], p - faces[i][0]) > 0 {
+                for j: 0..2 {
+                    current_edge: [2] Vector3;
+                    current_edge[0] = faces[i][j];
+                    current_edge[1] = faces[i][(j + 1) % 3];
+                    found_edge := false;
 
-					faces[f + 2] = faces[faces.count - 1];
-                    faces.count -= 1;
-					faces[f + 1] = faces[faces.count - 1];
-                    faces.count -= 1;
-					faces[f] = faces[faces.count - 1];
-                    faces.count -= 1;
+                    for k: 0..num_loose_edges - 1 {
+                        if loose_edges[k][1] == current_edge[0] && loose_edges[k][0] == current_edge[1] {
+                            loose_edges[k][0] = loose_edges[num_loose_edges - 1][0];
+                            loose_edges[k][1] = loose_edges[num_loose_edges - 1][1];
+                            num_loose_edges -= 1;
+                            found_edge = true;
+                            break;
+                        }
+                    }
 
-                    check_indices(polytope, faces);
+                    if !found_edge {
+                        if num_loose_edges >= MAX_LOOSE_EDGES {
+                            break;
+                        }
 
-					normals[i] = normals[normals.count - 1];
-                    normals.count -= 1;
-				} else {
-                    i += 1;
+                        loose_edges[num_loose_edges][0] = current_edge[0];
+                        loose_edges[num_loose_edges][1] = current_edge[1];
+                        num_loose_edges += 1;
+                    }
                 }
-			}
 
-            check_indices(polytope, faces);
+                faces[i] = faces[num_faces - 1];
+                num_faces -= 1;
+            } else {
+                i += 1;
+            }
+        }
 
-            new_faces: KodaIndices;
-            for i: 0..unique_edges.count / 2 - 1 {
-                edge_index1 := unique_edges[i * 2];
-                edge_index2 := unique_edges[i * 2 + 1];
-                add(*new_faces, edge_index1);
-                add(*new_faces, edge_index2);
-                add(*new_faces, xx polytope.count);
+        for i: 0..num_loose_edges - 1 {
+            if num_faces >= MAX_FACES {
+                break;
             }
 
-            add(*polytope, support);
+            faces[num_faces][0] = loose_edges[i][0];
+            faces[num_faces][1] = loose_edges[i][1];
+            faces[num_faces][2] = p;
+            faces[num_faces][3] = normalize(cross(loose_edges[i][0] - loose_edges[i][1], loose_edges[i][0] - p));
 
-            print("% %\n", polytope.count, new_faces.count);
-
-            check_indices(polytope, new_faces);
-
-            new_normals: KodaComplexNormals;
-            new_min_face: int;
-            new_normals, new_min_face = get_face_normals(polytope, new_faces);
-            old_min_distance := FLOAT32_MAX;
-            for i: 0..normals.count - 1 {
-                if normals[i].w < old_min_distance {
-					old_min_distance = normals[i].w;
-					min_face = i;
-				}
-			}
- 
-			if new_normals[new_min_face].w < old_min_distance {
-				min_face = new_min_face + normals.count;
-			}
- 
-            for i: 0..new_faces.count - 1 {
-                add(*faces, new_faces[i]);
-            }
-            for i: 0..new_normals.count - 1 {
-                add(*normals, new_normals[i]);
+            BIAS :: 0.000001;
+            if dot(faces[num_faces][0], faces[num_faces][3]) + BIAS < 0 {
+                temp_value := faces[num_faces][0];
+                faces[num_faces][0] = faces[num_faces][1];
+                faces[num_faces][1] = temp_value;
+                faces[num_faces][3] = -faces[num_faces][3];
             }
 
-            check_indices(polytope, new_faces);
-			// faces.insert(faces  .end(), newFaces  .begin(), newFaces  .end());
-			// normals.insert(normals.end(), newNormals.begin(), newNormals.end());
-		}
+            num_faces += 1;
+        }
     }
 
-    return min_normal * min_distance, true;
+    return true, faces[closest_face][3] * dot(faces[closest_face][0], faces[closest_face][3]);
+}
+
+solve_epa_open :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
+    simplex: KodaVertices(4);
+    inside := solve_gjk(a, b, .{}, *simplex);
+
+    MAX_ITERATIONS :: 64;
+    MAX_FACES :: 64;
+    MAX_LOOSE_EDGES :: 32;
+    TOLERANCE :: 0.0001;
+
+    faces: [64][4] Vector3;
+    faces[0][0] = simplex.fixed[0];
+    faces[0][1] = simplex.fixed[1];
+    faces[0][2] = simplex.fixed[2];
+    faces[0][3] = normalize(cross(simplex.fixed[1] - simplex.fixed[0], simplex.fixed[2] - simplex.fixed[0])); // abc
+    faces[1][0] = simplex.fixed[0];
+    faces[1][1] = simplex.fixed[2];
+    faces[1][2] = simplex.fixed[3];
+    faces[1][3] = normalize(cross(simplex.fixed[2] - simplex.fixed[0], simplex.fixed[3] - simplex.fixed[0])); // acd
+    faces[2][0] = simplex.fixed[0];
+    faces[2][1] = simplex.fixed[3];
+    faces[2][2] = simplex.fixed[1];
+    faces[2][3] = normalize(cross(simplex.fixed[3] - simplex.fixed[0], simplex.fixed[1] - simplex.fixed[0])); // adb
+    faces[3][0] = simplex.fixed[1];
+    faces[3][1] = simplex.fixed[3];
+    faces[3][2] = simplex.fixed[2];
+    faces[3][3] = normalize(cross(simplex.fixed[3] - simplex.fixed[1], simplex.fixed[2] - simplex.fixed[1])); // bdc
+
+    num_faces := 4;
+    closest_face: int;
+
+    for i: 0..MAX_ITERATIONS - 1 {
+        min_dist := dot(faces[0][0], faces[0][3]);
+        closest_face = 0;
+        for i: 1..num_faces - 1 {
+            dist := dot(faces[i][0], faces[i][3]);
+            if dist < min_dist {
+                min_dist = dist;
+                closest_face = i;
+            }
+        }
+
+        search_dir := faces[closest_face][3];
+        p := get_support(b, search_dir) - get_support(a, -search_dir);
+
+        if dot(p, search_dir) - min_dist < TOLERANCE {
+            return inside, faces[closest_face][3] * dot(p, search_dir);
+        }
+
+        loose_edges: [MAX_LOOSE_EDGES][2] Vector3;
+        num_loose_edges := 0;
+
+        i := 0;
+        while i < num_faces {
+            if dot(faces[i][3], p - faces[i][0]) > 0 {
+                for j: 0..2 {
+                    current_edge: [2] Vector3;
+                    current_edge[0] = faces[i][j];
+                    current_edge[1] = faces[i][(j + 1) % 3];
+                    found_edge := false;
+
+                    for k: 0..num_loose_edges - 1 {
+                        if loose_edges[k][1] == current_edge[0] && loose_edges[k][0] == current_edge[1] {
+                            loose_edges[k][0] = loose_edges[num_loose_edges - 1][0];
+                            loose_edges[k][1] = loose_edges[num_loose_edges - 1][1];
+                            num_loose_edges -= 1;
+                            found_edge = true;
+                            break;
+                        }
+                    }
+
+                    if !found_edge {
+                        if num_loose_edges >= MAX_LOOSE_EDGES {
+                            break;
+                        }
+
+                        loose_edges[num_loose_edges][0] = current_edge[0];
+                        loose_edges[num_loose_edges][1] = current_edge[1];
+                        num_loose_edges += 1;
+                    }
+                }
+
+                faces[i] = faces[num_faces - 1];
+                num_faces -= 1;
+            } else {
+                i += 1;
+            }
+        }
+
+        for i: 0..num_loose_edges - 1 {
+            if num_faces >= MAX_FACES {
+                break;
+            }
+
+            faces[num_faces][0] = loose_edges[i][0];
+            faces[num_faces][1] = loose_edges[i][1];
+            faces[num_faces][2] = p;
+            faces[num_faces][3] = normalize(cross(loose_edges[i][0] - loose_edges[i][1], loose_edges[i][0] - p));
+
+            BIAS :: 0.000001;
+            if dot(faces[num_faces][0], faces[num_faces][3]) + BIAS < 0 {
+                temp_value := faces[num_faces][0];
+                faces[num_faces][0] = faces[num_faces][1];
+                faces[num_faces][1] = temp_value;
+                faces[num_faces][3] = -faces[num_faces][3];
+            }
+
+            num_faces += 1;
+        }
+    }
+
+    return inside, faces[closest_face][3] * dot(faces[closest_face][0], faces[closest_face][3]);
 }
 
 #scope_file
 
-check_indices :: (polytope: KodaVertices($N), indices: KodaIndices($O)) {
-    for i: 0..indices.count - 1 {
-        assert(indices[i] < polytope.count, "Face index is not within the vertex range.");
-    }
-}
-
-Triangle :: struct {
-    p1: Vector3;
-    p2: Vector3;
-    p3: Vector3;
-}
-
-get_face_normals :: (polytope: KodaVertices($N), faces: KodaIndices($O)) -> KodaComplexNormals(O), int {
-    normals: KodaComplexNormals;
-    min_triangle := 0;
-    min_distance := FLOAT32_MAX;
-
-    for i: 0..faces.count / 3 - 1 {
-        a := polytope[faces[i * 3]];
-        b := polytope[faces[i * 3 + 1]];
-        c := polytope[faces[i * 3 + 2]];
-
-        normal := normalize(cross(b - a, c - a));
-        distance := dot(normal, a);
-
-        // TODO as long as I know the winding I dont think this is necessary, right?
-        if distance < 0 {
-            normal *= -1;
-            distance *= -1;
-        }
-
-        add(*normals, .{normal.x, normal.y, normal.z, distance});
-
-        if distance < min_distance {
-            min_triangle = i;
-            min_distance = distance;
-        }
-    }
-
-	return normals, min_triangle;
-}
-
-add_if_unique_edge :: (edges: *KodaIndices, faces: KodaIndices, a: int, b: int) {
-    for i: 0..edges.count / 2 - 1 {
-        first := edges.fixed[i * 2];
-        second := edges.fixed[i * 2 + 1];
-
-        if first == faces[b] && second == faces[a] {
-            // TODO could do ordered_remove(edges, i * 2, 2); and cut it down to a single loop
-            ordered_remove(edges, i * 2);
-            ordered_remove(edges, i * 2);
-
-            return;
-        }
-    }
-
-    add(edges, faces[a], faces[b]);
-}
-
-get_furthest_point :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
     if vertices.count == 0 {
         return .{};
     }
@@ -198,13 +250,92 @@ get_furthest_point :: (vertices: KodaVertices($N), direction: Vector3) -> Vector
     return largest_vertex;
 }
 
-get_support :: (a: KodaVertices, b: KodaVertices, direction: Vector3) -> Vector3 {
-    return get_furthest_point(a, direction) - get_furthest_point(b, -direction);
-}
+// check_indices :: (polytope: KodaVertices($N), indices: KodaIndices($O)) {
+//     for i: 0..indices.count - 1 {
+//         assert(indices[i] < polytope.count, "Face index is not within the vertex range.");
+//     }
+// }
 
-same_direction :: (direction: Vector3, ao: Vector3) -> bool {
-    return dot(direction, ao) > 0;
-}
+// Triangle :: struct {
+//     p1: Vector3;
+//     p2: Vector3;
+//     p3: Vector3;
+// }
+
+// get_face_normals :: (polytope: KodaVertices($N), faces: KodaIndices($O)) -> KodaComplexNormals(O), int {
+//     normals: KodaComplexNormals;
+//     min_triangle := 0;
+//     min_distance := FLOAT32_MAX;
+
+//     for i: 0..faces.count / 3 - 1 {
+//         a := polytope[faces[i * 3]];
+//         b := polytope[faces[i * 3 + 1]];
+//         c := polytope[faces[i * 3 + 2]];
+
+//         normal := normalize(cross(b - a, c - a));
+//         distance := dot(normal, a);
+
+//         // TODO as long as I know the winding I dont think this is necessary, right?
+//         if distance < 0 {
+//             normal *= -1;
+//             distance *= -1;
+//         }
+
+//         add(*normals, .{normal.x, normal.y, normal.z, distance});
+
+//         if distance < min_distance {
+//             min_triangle = i;
+//             min_distance = distance;
+//         }
+//     }
+
+// 	return normals, min_triangle;
+// }
+
+// add_if_unique_edge :: (edges: *KodaIndices, faces: KodaIndices, a: int, b: int) {
+//     for i: 0..edges.count / 2 - 1 {
+//         first := edges.fixed[i * 2];
+//         second := edges.fixed[i * 2 + 1];
+
+//         if first == faces[b] && second == faces[a] {
+//             // TODO could do ordered_remove(edges, i * 2, 2); and cut it down to a single loop
+//             ordered_remove(edges, i * 2);
+//             ordered_remove(edges, i * 2);
+
+//             return;
+//         }
+//     }
+
+//     add(edges, faces[a], faces[b]);
+// }
+
+// get_furthest_point :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+//     if vertices.count == 0 {
+//         return .{};
+//     }
+
+//     largest_dot := dot(vertices[0], direction);
+//     largest_vertex := vertices[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices[i];
+
+//         current_dot := dot(vertex, direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
+
+//     return largest_vertex;
+// }
+
+// get_support :: (a: KodaVertices, b: KodaVertices, direction: Vector3) -> Vector3 {
+//     return get_furthest_point(a, direction) - get_furthest_point(b, -direction);
+// }
+
+// same_direction :: (direction: Vector3, ao: Vector3) -> bool {
+//     return dot(direction, ao) > 0;
+// }
 
 
 //     polytope: [..] Vector3;
