@@ -1,4 +1,8 @@
 
+faces: [64][4] Vector3;
+face_closest: [4] Vector3;
+num_faces := 4;
+
 solve_epa :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
     simplex: KodaVertices(4);
     inside := solve_gjk(a, b, .{}, *simplex);
@@ -117,14 +121,14 @@ solve_epa :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
 
 solve_epa_open :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
     simplex: KodaVertices(4);
-    inside := solve_gjk(a, b, .{}, *simplex);
+    inside := solve_gjk_open(a, b, .{}, *simplex);
 
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;
     TOLERANCE :: 0.0001;
 
-    faces: [64][4] Vector3;
+    // faces: [64][4] Vector3;
     faces[0][0] = simplex.fixed[0];
     faces[0][1] = simplex.fixed[1];
     faces[0][2] = simplex.fixed[2];
@@ -142,7 +146,8 @@ solve_epa_open :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
     faces[3][2] = simplex.fixed[2];
     faces[3][3] = normalize(cross(simplex.fixed[3] - simplex.fixed[1], simplex.fixed[2] - simplex.fixed[1])); // bdc
 
-    num_faces := 4;
+    // num_faces := 4;
+    num_faces = 4;
     closest_face: int;
 
     for i: 0..MAX_ITERATIONS - 1 {
@@ -160,6 +165,18 @@ solve_epa_open :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
         p := get_support(b, search_dir) - get_support(a, -search_dir);
 
         if dot(p, search_dir) - min_dist < TOLERANCE {
+            // {
+            //     #import "KodaJai";
+            //     depth_test := get_depth_test();
+            //     defer set_depth_test(depth_test);
+            //     set_depth_test(false);
+            //     cull_face := get_cull_face();
+            //     defer set_cull_face(cull_face);
+            //     set_cull_face(false);
+
+            //     draw_triangle(faces[closest_face][0], faces[closest_face][1], faces[closest_face][2]);
+            // }
+            face_closest = faces[closest_face];
             return inside, faces[closest_face][3] * dot(p, search_dir);
         }
 
@@ -225,6 +242,22 @@ solve_epa_open :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
         }
     }
 
+    print("reached the end %\n", num_faces);
+    // {
+    //     depth_test := get_depth_test();
+    //     defer set_depth_test(depth_test);
+    //     set_depth_test(false);
+    //     cull_face := get_cull_face();
+    //     defer set_cull_face(cull_face);
+    //     set_cull_face(false);
+
+    //     draw_triangle(simplex.fixed[0], simplex.fixed[1], simplex.fixed[2]);
+    //     draw_triangle(simplex.fixed[0], simplex.fixed[2], simplex.fixed[3]);
+    //     draw_triangle(simplex.fixed[0], simplex.fixed[3], simplex.fixed[1]);
+    //     draw_triangle(simplex.fixed[1], simplex.fixed[3], simplex.fixed[2]);
+    // }
+
+    face_closest = faces[closest_face];
     return inside, faces[closest_face][3] * dot(faces[closest_face][0], faces[closest_face][3]);
 }
 
