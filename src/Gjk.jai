@@ -32,7 +32,7 @@ ComplexSimplex :: struct {
 }
 
 // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely
-solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = false) -> bool, ComplexSimplex, float {
+solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = false) -> bool, ComplexSimplex, Vector3, Vector3 {
     simplex: ComplexSimplex;
 
     direction := v1[0] - v2[0];
@@ -60,9 +60,9 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
 
     while true {
         #if GJK_DEBUG {
-            if check_debug(simplex, v1, v2, .{0, 1000, 0}, .{0, 1000, 0}) {
+            if step_debug(simplex, v1, v2, .{0, 1000, 0}, .{0, 1000, 0}) {
                 print("Exiting % %\n", gjk_debug_steps, gjk_debug_max_steps);
-                return false, simplex, 0.0;
+                return false, simplex, .{}, .{};
             }
         }
 
@@ -82,7 +82,7 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
 
             case;
                 assert(false, "Invalid simplex dimension.");
-                return false, simplex, 0.0;
+                return false, simplex, .{}, .{};
         }
 
         // checking if distance squared from p to 0 is less than epsilon rather than comparing it to 0
@@ -90,9 +90,9 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
         // check and the support point directional check below
         if dot(p, p) < EPSILON {
             #if GJK_DEBUG {
-                check_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
+                step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
             }
-            return true, simplex, 0.0;
+            return true, simplex, .{}, .{};
         }
 
         direction = -p;
@@ -105,22 +105,23 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
             // if we didn't find a point on the other side of the origin, it's not intersecting, so just exit
             // but we'll skip this step if we want the algorithm to finish so that we can use the nearest feature information
             if dot(support, direction) < 0 {
-                return false, simplex, 0.0;
+                return false, simplex, .{}, .{};
             }
         }
 
         #if GJK_DEBUG {
-            if check_debug(simplex, v1, v2, p, support) {
-                return false, simplex, 0.0;
+            if step_debug(simplex, v1, v2, p, support) {
+                return false, simplex, .{}, .{};
             }
         }
 
         // if p is more than or equivalently extremal in the direction of the origin, we can't find a better support point
         if dot(p, direction) >= dot(support, direction) - EPSILON {
             #if GJK_DEBUG {
-                check_debug(simplex, v1, v2, p, support, true);
+                step_debug(simplex, v1, v2, p, support, true);
             }
-            return false, simplex, dot(p, p);
+            closest1, closest2 := get_local_points(simplex, p);
+            return false, simplex, closest1, closest2;
         }
 
         assert(simplex.count < 4, "You cannot have a simplex that's a tetrahedron at this point.");
@@ -128,7 +129,6 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
         simplex.d_all = simplex.c_all;
         simplex.c_all = simplex.b_all;
         simplex.b_all = simplex.a_all;
-
         simplex.count += 1;
 
         simplex.a1 = support1;
@@ -136,75 +136,10 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
         simplex.a = support;
     }
 
-    return false, simplex, 0.0;
+    return false, simplex, .{}, .{};
 }
 
 #scope_file
-
-EPSILON :: 0.000001;
-GJK_DEBUG :: true;
-
-gjk_debug_points: [..] Vector3;
-gjk_debug_steps: int;
-gjk_debug_max_steps: int;
-
-check_debug :: (simplex: ComplexSimplex, v1: KodaVertices, v2: KodaVertices, p: Vector3, support: Vector3, force_draw: bool = false) -> bool {
-    if gjk_debug_steps >= gjk_debug_max_steps || force_draw {
-        #import "KodaJai";
-
-        draw_text(tprint("GJK Step: %", gjk_debug_steps), .{400, 50});
-
-        depth_test := get_depth_test();
-        defer set_depth_test(depth_test);
-        set_depth_test(false);
-        cull_face := get_cull_face();
-        defer set_cull_face(cull_face);
-        set_cull_face(false);
-
-        array_resize(*gjk_debug_points, v1.count * v2.count);
-        for i: 0..v1.count - 1 {
-            for j: 0..v2.count - 1 {
-                point := v2[j] - v1[i];
-                gjk_debug_points[i * v2.count + j] = point;
-            }
-        }
-
-        draw_spheres(gjk_debug_points, .{0.2, 0.2, 0.2}, color = .{0.8, 0.8, 0.8, 0.1});
-
-        draw_cube(p - .{0.04, 0.04, 0.04}, p + .{0.04, 0.04, 0.04}, color = .{0.8, 0.8, 0.8, 1.0});
-        draw_cube(support - .{0.04, 0.04, 0.04}, support + .{0.04, 0.04, 0.04}, color = .{0.4, 0.4, 0.4, 1.0});
-
-        if simplex.count == 1 {
-            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
-        } else if simplex.count == 2 {
-            draw_line(simplex.a, simplex.b, color = .{1.0, 1.0, 0.0, 1.0});
-            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
-            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
-        } else if simplex.count == 3 {
-            draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
-            draw_line(simplex.a, simplex.b, color = .{1.0, 1.0, 0.0, 1.0});
-            draw_line(simplex.b, simplex.c, color = .{0.0, 1.0, 1.0, 1.0});
-            draw_line(simplex.c, simplex.a, color = .{1.0, 0.0, 1.0, 1.0});
-            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
-            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
-            draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});
-        } else if simplex.count == 4 {
-            draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
-            draw_triangle(simplex.a, simplex.c, simplex.d, color = .{0.2, 1.0, 0.5, 0.5});
-            draw_triangle(simplex.a, simplex.d, simplex.b, color = .{0.5, 0.2, 1.0, 0.5});
-            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
-            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
-            draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});
-            draw_cube(simplex.d - .{0.02, 0.02, 0.02}, simplex.d + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 1.0, 1.0});
-        }
-
-        return true;
-    }
-
-    gjk_debug_steps += 1;
-
-    return false;
-}
 
 // every simplex solvers job is to reduce the simplex to the minimum subsimplex supporting the origin, and return the point closest to the origin
 
@@ -405,4 +340,159 @@ get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
 
 same_direction :: (a: Vector3, b: Vector3) -> bool {
     return dot(a, b) > 0;
+}
+
+get_local_points :: (simplex: ComplexSimplex, p: Vector3) -> Vector3, Vector3 {
+    if simplex.count == {
+        case 1;
+            return simplex.a1, simplex.a2;
+
+        case 2;
+            barycentric := convert_barycentric(simplex.a, simplex.b, p);
+            cartesian1 := convert_cartesian(simplex.a1, simplex.b1, barycentric);
+            cartesian2 := convert_cartesian(simplex.a2, simplex.b2, barycentric);
+            return cartesian1, cartesian2;
+
+        case 3;
+            barycentric := convert_barycentric(simplex.a, simplex.b, simplex.c, p);
+            cartesian1 := convert_cartesian(simplex.a1, simplex.b1, simplex.c1, barycentric);
+            cartesian2 := convert_cartesian(simplex.a2, simplex.b2, simplex.c2, barycentric);
+            return cartesian1, cartesian2;
+
+        case;
+            assert(false, "Invalid simplex dimension for nearest feature resolution.");
+            return .{}, .{};
+    }
+}
+
+convert_barycentric :: (a: Vector3, b: Vector3, c: Vector3, p: Vector3) -> Vector3 {
+    triangle_area_2d :: (x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) -> float {
+        return (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2);
+    }
+
+    abc := cross(b - a, c - a);
+
+    nu: float;
+    nv: float;
+    ood: float;
+
+    x := abs(abc.x);
+    y := abs(abc.y);
+    z := abs(abc.z);
+
+    if x >= y && x >= z {
+        // x is the largest so project onto the yz plane
+        nu = triangle_area_2d(p.y, p.z, b.y, b.z, c.y, c.z);
+        nv = triangle_area_2d(p.y, p.z, c.y, c.z, a.y, a.z);
+        ood = 1.0 / abc.x;
+    } else if y >= x && y >= z {
+        // y is the largest so project onto the xz plane
+        nu = triangle_area_2d(p.x, p.z, b.x, b.z, c.x, c.z);
+        nv = triangle_area_2d(p.x, p.z, c.x, c.z, a.x, a.z);
+        ood = 1.0 / -abc.y;
+    } else {
+        // z is the largest so project onto the xy plane
+        nu = triangle_area_2d(p.x, p.y, b.x, b.y, c.x, c.y);
+        nv = triangle_area_2d(p.x, p.y, c.x, c.y, a.x, a.y);
+        ood = 1.0 / abc.z;
+    }
+
+    result: Vector3 = ---;
+    result.x = nu * ood;
+    result.y = nv * ood;
+    result.z = 1.0 - result.x - result.y;
+    return result;
+}
+
+convert_cartesian :: (a: Vector3, b: Vector3, c: Vector3, barycentric: Vector3) -> Vector3 {
+    result: Vector3 = ---;
+    result.x = a.x * barycentric.x + b.x * barycentric.y + c.x * barycentric.z;
+    result.y = a.y * barycentric.x + b.y * barycentric.y + c.y * barycentric.z;
+    result.z = a.z * barycentric.x + b.z * barycentric.y + c.z * barycentric.z;
+    return result;
+}
+
+convert_barycentric :: (a: Vector3, b: Vector3, p: Vector3) -> float {
+    ab := b - a;
+    ap := p - a;
+
+    t := dot(ap, ab) / dot(ab, ab);
+    return t;
+}
+
+convert_cartesian :: (a: Vector3, b: Vector3, barycentric: float) -> Vector3 {
+    result: Vector3 = ---;
+    result.x = a.x + barycentric * (b.x - a.x);
+    result.y = a.y + barycentric * (b.y - a.y);
+    result.z = a.z + barycentric * (b.z - a.z);
+    return result;
+}
+
+
+
+// debug
+
+EPSILON :: 0.000001;
+GJK_DEBUG :: true;
+
+gjk_debug_points: [..] Vector3;
+gjk_debug_steps: int;
+gjk_debug_max_steps: int;
+
+step_debug :: (simplex: ComplexSimplex, v1: KodaVertices, v2: KodaVertices, p: Vector3, support: Vector3, force_draw: bool = false) -> bool {
+    if gjk_debug_steps >= gjk_debug_max_steps || force_draw {
+        #import "KodaJai";
+
+        draw_text(tprint("GJK Step: %", gjk_debug_steps), .{400, 80});
+
+        depth_test := get_depth_test();
+        defer set_depth_test(depth_test);
+        set_depth_test(false);
+        cull_face := get_cull_face();
+        defer set_cull_face(cull_face);
+        set_cull_face(false);
+
+        array_resize(*gjk_debug_points, v1.count * v2.count);
+        for i: 0..v1.count - 1 {
+            for j: 0..v2.count - 1 {
+                point := v2[j] - v1[i];
+                gjk_debug_points[i * v2.count + j] = point;
+            }
+        }
+
+        draw_spheres(gjk_debug_points, .{0.2, 0.2, 0.2}, color = .{0.8, 0.8, 0.8, 0.1});
+
+        draw_cube(p - .{0.04, 0.04, 0.04}, p + .{0.04, 0.04, 0.04}, color = .{0.8, 0.8, 0.8, 1.0});
+        draw_cube(support - .{0.04, 0.04, 0.04}, support + .{0.04, 0.04, 0.04}, color = .{0.4, 0.4, 0.4, 1.0});
+
+        if simplex.count == 1 {
+            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
+        } else if simplex.count == 2 {
+            draw_line(simplex.a, simplex.b, color = .{1.0, 1.0, 0.0, 1.0});
+            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
+            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
+        } else if simplex.count == 3 {
+            draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
+            draw_line(simplex.a, simplex.b, color = .{1.0, 1.0, 0.0, 1.0});
+            draw_line(simplex.b, simplex.c, color = .{0.0, 1.0, 1.0, 1.0});
+            draw_line(simplex.c, simplex.a, color = .{1.0, 0.0, 1.0, 1.0});
+            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
+            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
+            draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});
+        } else if simplex.count == 4 {
+            draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
+            draw_triangle(simplex.a, simplex.c, simplex.d, color = .{0.2, 1.0, 0.5, 0.5});
+            draw_triangle(simplex.a, simplex.d, simplex.b, color = .{0.5, 0.2, 1.0, 0.5});
+            draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
+            draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
+            draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});
+            draw_cube(simplex.d - .{0.02, 0.02, 0.02}, simplex.d + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 1.0, 1.0});
+        }
+
+        return true;
+    }
+
+    gjk_debug_steps += 1;
+
+    return false;
 }
