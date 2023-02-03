@@ -38,7 +38,6 @@ solve_gjk_simple :: (v1: KodaVertices, v2: KodaVertices) -> bool {
     while true {
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, get_support(v2, direction) - get_support(v1, -direction)) {
-                print("Exiting % %\n", gjk_debug_steps, gjk_debug_max_steps);
                 return false;
             }
         }
@@ -52,7 +51,6 @@ solve_gjk_simple :: (v1: KodaVertices, v2: KodaVertices) -> bool {
 
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}) {
-                print("Exiting % %\n", gjk_debug_steps, gjk_debug_max_steps);
                 return false;
             }
         }
@@ -149,7 +147,6 @@ solve_simplex3 :: (simplex: *Simplex, direction: Vector3) -> Vector3 {
                 return abc;
             } else {
                 // the origin is nearest to the triangle acb
-                // simplex c remains as c
                 simplex.b, simplex.c = swap(simplex.b, simplex.c);
                 return -abc;
             }
@@ -171,8 +168,8 @@ solve_simplex4 :: (simplex: *Simplex, direction: Vector3) -> bool, Vector3 {
 
     if same_direction(acd, ao) {
         // the origin is nearest to the triangle acd
-        simplex.c = simplex.d;
         simplex.b = simplex.c;
+        simplex.c = simplex.d;
         simplex.count = 3;
         return false, solve_simplex3(simplex, direction);
     }
@@ -261,6 +258,11 @@ step_debug :: (simplex: Simplex, v1: KodaVertices, v2: KodaVertices, support: Ve
             draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
             draw_triangle(simplex.a, simplex.c, simplex.d, color = .{0.2, 1.0, 0.5, 0.5});
             draw_triangle(simplex.a, simplex.d, simplex.b, color = .{0.5, 0.2, 1.0, 0.5});
+            {
+                set_cull_face(true);
+                defer set_cull_face(false);
+                draw_triangle(simplex.d, simplex.c, simplex.b, color = .{1.0, 1.0, 1.0, 1.0});
+            }
             draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
             draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
             draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});

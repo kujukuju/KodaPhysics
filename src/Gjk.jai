@@ -61,7 +61,6 @@ solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = fa
     while true {
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}, .{0, 1000, 0}) {
-                print("Exiting % %\n", gjk_debug_steps, gjk_debug_max_steps);
                 return false, simplex, .{}, .{};
             }
         }
@@ -319,10 +318,11 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
 
     // the origin isn't outside of any plane, so it's inside the tretrahedron
     return .{0, 0, 0};
-
 }
 
 get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
+    velocity: Vector3;
+
     largest_dot := dot(vertices[0], direction);
     largest_vertex := vertices[0];
     for i: 1..vertices.count - 1 {
@@ -334,6 +334,18 @@ get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
             largest_vertex = vertex;
         }
     }
+
+    for i: 1..vertices.count - 1 {
+        vertex := vertices[i] + velocity;
+
+        current_dot := dot(vertex, direction);
+        if current_dot > largest_dot {
+            largest_dot = current_dot;
+            largest_vertex = vertex;
+        }
+    }
+
+    
 
     return largest_vertex;
 }
@@ -483,6 +495,11 @@ step_debug :: (simplex: ComplexSimplex, v1: KodaVertices, v2: KodaVertices, p: V
             draw_triangle(simplex.a, simplex.b, simplex.c, color = .{1.0, 0.5, 0.2, 0.5});
             draw_triangle(simplex.a, simplex.c, simplex.d, color = .{0.2, 1.0, 0.5, 0.5});
             draw_triangle(simplex.a, simplex.d, simplex.b, color = .{0.5, 0.2, 1.0, 0.5});
+            {
+                set_cull_face(true);
+                defer set_cull_face(false);
+                draw_triangle(simplex.d, simplex.c, simplex.b, color = .{1.0, 1.0, 1.0, 1.0});
+            }
             draw_cube(simplex.a - .{0.02, 0.02, 0.02}, simplex.a + .{0.02, 0.02, 0.02}, color = .{1.0, 0.0, 0.0, 1.0});
             draw_cube(simplex.b - .{0.02, 0.02, 0.02}, simplex.b + .{0.02, 0.02, 0.02}, color = .{0.0, 1.0, 0.0, 1.0});
             draw_cube(simplex.c - .{0.02, 0.02, 0.02}, simplex.c + .{0.02, 0.02, 0.02}, color = .{0.0, 0.0, 1.0, 1.0});
