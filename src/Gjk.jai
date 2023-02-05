@@ -32,7 +32,7 @@ ComplexSimplex :: struct {
 }
 
 // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely
-solve_gjk :: (v1: KodaVertices, v2: KodaVertices, $resolve_completely: bool = false) -> bool, ComplexSimplex, Vector3, Vector3 {
+solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), $resolve_completely: bool = true) -> bool, ComplexSimplex, Vector3, Vector3 {
     simplex: ComplexSimplex;
 
     direction := v1[0] - v2[0];
@@ -320,9 +320,7 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
     return .{0, 0, 0};
 }
 
-get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
-    velocity: Vector3;
-
+get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
     largest_dot := dot(vertices[0], direction);
     largest_vertex := vertices[0];
     for i: 1..vertices.count - 1 {
@@ -334,18 +332,6 @@ get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
             largest_vertex = vertex;
         }
     }
-
-    for i: 1..vertices.count - 1 {
-        vertex := vertices[i] + velocity;
-
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
-
-    
 
     return largest_vertex;
 }
@@ -445,13 +431,13 @@ convert_cartesian :: (a: Vector3, b: Vector3, barycentric: float) -> Vector3 {
 // debug
 
 EPSILON :: 0.000001;
-GJK_DEBUG :: true;
+GJK_DEBUG :: false;
 
 gjk_debug_points: [..] Vector3;
 gjk_debug_steps: int;
 gjk_debug_max_steps: int;
 
-step_debug :: (simplex: ComplexSimplex, v1: KodaVertices, v2: KodaVertices, p: Vector3, support: Vector3, force_draw: bool = false) -> bool {
+step_debug :: (simplex: ComplexSimplex, v1: KodaVertices($N1), v2: KodaVertices($N2), p: Vector3, support: Vector3, force_draw: bool = false) -> bool {
     if gjk_debug_steps >= gjk_debug_max_steps || force_draw {
         #import "KodaJai";
 

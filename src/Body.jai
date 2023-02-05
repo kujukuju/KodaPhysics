@@ -1,33 +1,39 @@
 KodaBody :: struct {
     type: KodaBodyType;
-    shape: KodaShape;
-    id: int;
+    shapes: [..] KodaShape;
+    aabb: AABB3;
 
     position: Vector3;
     velocity: Vector3;
     rotation: Quaternion;
     scale: Vector3 = .{1, 1, 1};
-    // aabb: AABB3;
 
     dirty_position: Vector3;
     dirty_velocity: Vector3;
     dirty_rotation: Quaternion;
-    dirty_scale: Vector3;
+    dirty_scale: Vector3 = .{1, 1, 1};
 
     collision_normals: [..] Vector3;
 
-    tree_proxy: int = -1;
+    proxy: int = -1;
 }
 
 KodaBodyType :: enum {
     Static;
-    Kinematic;
+    Dynamic;
 }
 
-create_body :: (shape: KodaShape, type: KodaBodyType = .Static) -> KodaBody {
-    body: KodaBody;
+create_body :: (shapes: ..KodaShape, type: KodaBodyType) -> *KodaBody {
+    body := claim(*allocated_bodies);
     body.type = type;
-    body.shape = shape;
+    body.aabb = shapes[0].aabb;
+    for shape: shapes {
+        array_add(*body.shapes, shape);
+        body.aabb = merge(body.aabb, shape.aabb);
+    }
+
+    body.proxy = create_proxy(tree_bodies, get_world_aabb(body), body);
+
     return body;
 }
 
@@ -54,7 +60,7 @@ set_rotation :: (body: *KodaBody, rotation: Quaternion) {
 }
 
 get_transform :: (body: KodaBody) -> Matrix4 {
-    matrix := Matrix4_Identity;
+    matrix := Matrix4Identity;
     matrix = translate(matrix, body.position);
     matrix = rotate(matrix, body.rotation);
     matrix = scale(matrix, body.scale);
@@ -64,18 +70,18 @@ get_transform :: (body: KodaBody) -> Matrix4 {
 get_world_aabb :: (body: KodaBody) -> AABB3 {
     matrix := get_transform(body);
 
-    shape_aabb_points: [8] Vector3;
-    shape_aabb_points[0] = Vector3.{body.shape.aabb.lower.x, body.shape.aabb.lower.y, body.shape.aabb.lower.z};
-    shape_aabb_points[1] = Vector3.{body.shape.aabb.lower.x, body.shape.aabb.lower.y, body.shape.aabb.upper.z};
-    shape_aabb_points[2] = Vector3.{body.shape.aabb.lower.x, body.shape.aabb.upper.y, body.shape.aabb.lower.z};
-    shape_aabb_points[3] = Vector3.{body.shape.aabb.lower.x, body.shape.aabb.upper.y, body.shape.aabb.upper.z};
-    shape_aabb_points[4] = Vector3.{body.shape.aabb.upper.x, body.shape.aabb.lower.y, body.shape.aabb.lower.z};
-    shape_aabb_points[5] = Vector3.{body.shape.aabb.upper.x, body.shape.aabb.lower.y, body.shape.aabb.upper.z};
-    shape_aabb_points[6] = Vector3.{body.shape.aabb.upper.x, body.shape.aabb.upper.y, body.shape.aabb.lower.z};
-    shape_aabb_points[7] = Vector3.{body.shape.aabb.upper.x, body.shape.aabb.upper.y, body.shape.aabb.upper.z};
+    aabb_points: [8] Vector3;
+    aabb_points[0] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.lower.z};
+    aabb_points[1] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.upper.z};
+    aabb_points[2] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.lower.z};
+    aabb_points[3] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.upper.z};
+    aabb_points[4] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.lower.z};
+    aabb_points[5] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.upper.z};
+    aabb_points[6] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.lower.z};
+    aabb_points[7] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.upper.z};
 
     first: Vector4 = ---;
-    first.xyz = shape_aabb_points[0];
+    first.xyz = aabb_points[0];
     first.w = 1.0;
     first = matrix * first;
 
@@ -83,9 +89,9 @@ get_world_aabb :: (body: KodaBody) -> AABB3 {
     aabb.lower = first.xyz;
     aabb.upper = first.xyz;
 
-    for i: 1..shape_aabb_points.count - 1 {
+    for i: 1..aabb_points.count - 1 {
         point: Vector4 = ---;
-        point.xyz = shape_aabb_points[i];
+        point.xyz = aabb_points[i];
         point.w = 1.0;
         point = matrix * point;
 
@@ -96,10 +102,17 @@ get_world_aabb :: (body: KodaBody) -> AABB3 {
     return aabb;
 }
 
-get_world_vertices :: (body: KodaBody) -> KodaVertices(MAX_VERTICES) {
-    matrix := get_transform(body);
-    vertices := body.shape.vertices;
+// TODO I should be able to do all these modifications in the support function, this isnt necessary
+get_world_vertices :: (body: KodaBody, shape_index: int) -> KodaVertices(MAX_VERTICES) {
+    return get_world_vertices(body, body.shapes[shape_index]);
+}
 
+get_world_vertices :: (body: KodaBody, shape: KodaShape) -> KodaVertices(MAX_VERTICES) {
+    // TODO should not do this, just offset in the support function
+    assert(shape.type == .ConvexHull, "Cannot get world vertices of a triangle mesh. It's too expensive.");
+
+    matrix := get_transform(body);
+    vertices := shape.vertices;
     for i: 0..vertices.count - 1 {
         vertex: Vector4 = ---;
         vertex.xyz = vertices[i];

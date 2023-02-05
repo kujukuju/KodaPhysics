@@ -10,7 +10,7 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
-solve_gjk_simple :: (v1: KodaVertices, v2: KodaVertices) -> bool {
+solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
     simplex: Simplex;
     simplex.count = 1;
 
@@ -185,7 +185,7 @@ solve_simplex4 :: (simplex: *Simplex, direction: Vector3) -> bool, Vector3 {
     return true, .{0, 0, 0};
 }
 
-get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
+get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
     largest_dot := dot(vertices[0], direction);
     largest_vertex := vertices[0];
     for i: 1..vertices.count - 1 {
@@ -209,13 +209,13 @@ same_direction :: (a: Vector3, b: Vector3) -> bool {
 
 // debug
 
-GJK_DEBUG :: true;
+GJK_DEBUG :: false;
 
 gjk_debug_points: [..] Vector3;
 gjk_debug_steps: int;
 gjk_debug_max_steps: int;
 
-step_debug :: (simplex: Simplex, v1: KodaVertices, v2: KodaVertices, support: Vector3, force_draw: bool = false) -> bool {
+step_debug :: (simplex: Simplex, v1: KodaVertices($N1), v2: KodaVertices($N2), support: Vector3, force_draw: bool = false) -> bool {
     if gjk_debug_steps >= gjk_debug_max_steps || force_draw {
         #import "KodaJai";
 

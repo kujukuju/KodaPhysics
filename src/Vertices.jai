@@ -48,4 +48,4 @@ get_view :: (vertices: *KodaVertices) -> [] Vector3 {
     return view;
 }
 
-MAX_VERTICES :: 1024 * 3;
+MAX_VERTICES :: 1024;
