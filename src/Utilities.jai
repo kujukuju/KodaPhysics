@@ -23,6 +23,16 @@ view :: (vertices: *BodyVertices) -> [] Vector2 {
     return view;
 }
 
+#scope_module
+
+push_temporary_context :: () #expand {
+    old_allocator := context.allocator;
+
+    // TODO can you just do defer context.allocator = context.allocator or will that not copy appropriately?
+    context.allocator = __temporary_allocator;
+    defer context.allocator = old_allocator;
+}
+
 #scope_file
 
 #import "Basic";

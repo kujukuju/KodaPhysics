@@ -1,10 +1,5 @@
 
-solve_epa :: (a: KodaVertices, b: KodaVertices) -> bool, Vector3 {
-    inside, simplex := solve_gjk(a, b);
-    if !inside {
-        return false, .{};
-    }
-
+solve_epa :: (a: KodaVertices, b: KodaVertices, simplex: Simplex) -> bool, Vector3 {
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;

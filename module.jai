@@ -13,6 +13,7 @@
 
 #scope_module
 
+#import "JaiBoundingTree";
 #import "JaiMath";
-#import "BlockAllocatorJai"
+#import "BlockAllocatorJai";
 #import "Math";

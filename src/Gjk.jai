@@ -32,12 +32,12 @@ ComplexSimplex :: struct {
 }
 
 // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely
-solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), $resolve_completely: bool = true) -> bool, ComplexSimplex, Vector3, Vector3 {
+solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}, $resolve_completely: bool = false) -> bool, ComplexSimplex, Vector3, Vector3 {
     simplex: ComplexSimplex;
 
     direction := v1[0] - v2[0];
-    simplex.a1 = get_support(v1, -direction);
-    simplex.a2 = get_support(v2, direction);
+    simplex.a1 = get_support(v1, -direction, velocity1);
+    simplex.a2 = get_support(v2, direction, velocity2);
     simplex.a = simplex.a2 - simplex.a1;
     simplex.count = 1;
 
@@ -77,7 +77,14 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), $resolve_completely:
                 p = solve_simplex3(*simplex);
 
             case 4;
+                current_simplex := simplex;
                 p = solve_simplex4(*simplex);
+                if p == .{} {
+                    #if GJK_DEBUG {
+                        step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
+                    }
+                    return true, current_simplex, .{}, .{};
+                }
 
             case;
                 assert(false, "Invalid simplex dimension.");
@@ -87,17 +94,18 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), $resolve_completely:
         // checking if distance squared from p to 0 is less than epsilon rather than comparing it to 0
         // because I'm not entirely sure how it would work together with the tetrahedron cross product
         // check and the support point directional check below
-        if dot(p, p) < EPSILON {
-            #if GJK_DEBUG {
-                step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
-            }
-            return true, simplex, .{}, .{};
-        }
+        // if dot(p, p) < EPSILON {
+        //     #if GJK_DEBUG {
+        //         step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
+        //     }
+        //     closest1, closest2 := get_local_points(simplex, p);
+        //     return true, simplex, closest1, closest2;
+        // }
 
         direction = -p;
 
-        support1 := get_support(v1, -direction);
-        support2 := get_support(v2, direction);
+        support1 := get_support(v1, -direction, velocity1);
+        support2 := get_support(v2, direction, velocity2);
         support := support2 - support1;
         
         #if !resolve_completely {
@@ -136,6 +144,52 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), $resolve_completely:
     }
 
     return false, simplex, .{}, .{};
+}
+
+resolve_simplex :: (complex: ComplexSimplex) -> Simplex, Simplex {
+    simplex1: Simplex;
+    simplex1.a = complex.a1;
+    simplex1.count = 1;
+
+    simplex2: Simplex;
+    simplex2.a = complex.a2;
+    simplex2.count = 1;
+
+    // not sure if first is necessary but it makes sense to me that vertex c and a could overlap
+    first1 := simplex1.a;
+    first2 := simplex2.a;
+    last1 := simplex1.a;
+    last2 := simplex2.a;
+
+    for i: 1..complex.count - 1 {
+        current1: Vector3 = ---;
+        current2: Vector3 = ---;
+
+        if i == {
+            case 1;
+                current1 = complex.b1;
+                current2 = complex.b2;
+            case 2;
+                current1 = complex.c1;
+                current2 = complex.c2;
+            case 3;
+                current1 = complex.d1;
+                current2 = complex.d2;
+            case;
+                assert(false, "Cannot access complex vertex 4.");
+        }
+        
+        if current1 != first1 && current1 != last1 {
+            simplex1.s[simplex1.count] = current1;
+            simplex1.count += 1;
+        }
+        if current2 != first2 && current2 != last2 {
+            simplex2.s[simplex2.count] = current2;
+            simplex2.count += 1;
+        }
+    }
+
+    return simplex1, simplex2;
 }
 
 #scope_file
@@ -320,7 +374,7 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
     return .{0, 0, 0};
 }
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
     largest_dot := dot(vertices[0], direction);
     largest_vertex := vertices[0];
     for i: 1..vertices.count - 1 {
@@ -330,6 +384,18 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
         if current_dot > largest_dot {
             largest_dot = current_dot;
             largest_vertex = vertex;
+        }
+    }
+
+    if dot(velocity, velocity) > 0 {
+        for i: 0..vertices.count - 1 {
+            vertex := vertices[i] + velocity;
+
+            current_dot := dot(vertex, direction);
+            if current_dot > largest_dot {
+                largest_dot = current_dot;
+                largest_vertex = vertex;
+            }
         }
     }
 

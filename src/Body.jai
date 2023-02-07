@@ -9,7 +9,7 @@ KodaBody :: struct {
     scale: Vector3 = .{1, 1, 1};
 
     dirty_position: Vector3;
-    dirty_velocity: Vector3;
+    // dirty_velocity: Vector3;
     dirty_rotation: Quaternion;
     dirty_scale: Vector3 = .{1, 1, 1};
 
@@ -23,7 +23,16 @@ KodaBodyType :: enum {
     Dynamic;
 }
 
-create_body :: (shapes: ..KodaShape, type: KodaBodyType) -> *KodaBody {
+create_body :: (shape: KodaShape, type: KodaBodyType) -> *KodaBody {
+    shapes: [1] KodaShape;
+    shapes[0] = shape;
+
+    return create_body(shapes, type);
+}
+
+create_body :: (shapes: [] KodaShape, type: KodaBodyType) -> *KodaBody {
+    assert(physics_initialized, "Your physics world must be initialized before you create bodies.");
+
     body := claim(*allocated_bodies);
     body.type = type;
     body.aabb = shapes[0].aabb;
@@ -32,19 +41,23 @@ create_body :: (shapes: ..KodaShape, type: KodaBodyType) -> *KodaBody {
         body.aabb = merge(body.aabb, shape.aabb);
     }
 
-    body.proxy = create_proxy(tree_bodies, get_world_aabb(body), body);
+    body.proxy = create_proxy(*tree_bodies, get_world_aabb(body), body);
 
     return body;
 }
 
 is_dirty :: inline (body: KodaBody) -> bool {
-    return body.position != body.dirty_position || body.rotation != body.dirty_rotation;
+    dirty := false;
+    dirty = dirty || body.position != body.dirty_position;
+    dirty = dirty || body.rotation != body.dirty_rotation;
+    dirty = dirty || body.scale != body.dirty_scale;
+    return dirty;
 }
 
 clear_dirty :: inline (body: *KodaBody) {
     body.dirty_position = body.position;
-    body.dirty_velocity = body.velocity;
     body.dirty_rotation = body.rotation;
+    body.dirty_scale = body.scale;
 }
 
 set_position :: (body: *KodaBody, position: Vector3) {
@@ -112,7 +125,7 @@ get_world_vertices :: (body: KodaBody, shape: KodaShape) -> KodaVertices(MAX_VER
     assert(shape.type == .ConvexHull, "Cannot get world vertices of a triangle mesh. It's too expensive.");
 
     matrix := get_transform(body);
-    vertices := shape.vertices;
+    vertices := shape.hull.vertices;
     for i: 0..vertices.count - 1 {
         vertex: Vector4 = ---;
         vertex.xyz = vertices[i];

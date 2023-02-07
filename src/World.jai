@@ -1,13 +1,28 @@
 
 koda_physics_init :: () {
+    physics_initialized = true;
     tree_bodies = create_bounding_tree(*KodaBody);
 }
 
 step_physics :: (dt: float) {
+    for *allocated_bodies {
+        // TODO if the body is alive
+        it.velocity += gravity * dt;
+    }
+
+    for *allocated_bodies {
+        if is_dirty(it) {
+            clear_dirty(it);
+
+            aabb := get_world_aabb(it);
+            move_proxy(*tree_bodies, it.proxy, aabb);
+        }
+    }
+
     push_temporary_context();
 
-    for body: allocated_bodies {
-        if body.type != .Dynamic {
+    for *allocated_bodies {
+        if it.type != .Dynamic {
             continue;
         }
 
@@ -19,48 +34,54 @@ step_physics :: (dt: float) {
 
         // this can be a direct check of 0 without any epsilon because the resolve collision function will return dt if no collision is found
         while remaining_delta > 0 {
-            position := body.position;
-            body.position += body.velocity * remaining_delta;
+            position := it.position;
+            it.position += it.velocity * remaining_delta;
 
-            body_aabb := get_world_aabb(body);
-            body.position = position;
+            body_aabb := get_world_aabb(it);
+            it.position = position;
 
             potential_collisions: [..] *KodaBody;
-            query(bodies, body_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
+            query(tree_bodies, body_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
                 if p.type == .Static {
-                    array_add(*potential_collisions, p);
+                    array_add(potential_collisions, p);
                 }
 
                 return true;
             }, *potential_collisions);
 
+            minimum_delta := remaining_delta;
+            minimum_normal: Vector3;
+
             for p: potential_collisions {
-                minimum_delta, minimum_normal := resolve_collision(body, p, body.velocity, remaining_delta);
+                delta, normal := resolve_collision(it, p, it.velocity, remaining_delta);
+                if delta < minimum_delta {
+                    minimum_delta = delta;
+                    minimum_normal = normal;
+                }
+            }
 
-                body.position += body.velocity * minimum_delta;
-                body.velocity = project_direction(minimum_normal, body.velocity);
+            it.position += it.velocity * minimum_delta;
+            remaining_delta -= minimum_delta;
 
+            if dot(minimum_normal, minimum_normal) > 0 {
                 // limit the allowed movement to the normal and adjust velocity
-
-                remaining_delta -= minimum_delta;
+                it.velocity = project_direction(minimum_normal, it.velocity);
             }
         }
-
-        
-
-        // body_vertices := get_world_vertices(body);
-
-        // for p: potential_collisions {
-        //     p_vertices := get_world_vertices(p);
-
-        //     if solve_gjk_simple(p_vertices, body_vertices) {
-
-        //     }
-        // }
     }
 }
 
-resolve_collision :: (a: *KodaBody, b: *KodaBody, velocity: Vector3, dt: float) -> float, Vector3 {
+get_gravity :: () -> Vector3 {
+    return gravity;
+}
+
+set_gravity :: (g: Vector3) {
+    gravity = g;
+}
+
+#scope_module
+
+resolve_collision :: (a: *KodaBody, b: *KodaBody, velocity: Vector3, dt: float) -> Vector3, Vector3, Vector3, float {
     assert(a.type == .Dynamic, "Right now only dynamic on static collisions are allowed.");
     assert(b.type == .Static, "Right now only dynamic on static collisions are allowed.");
 
@@ -72,7 +93,8 @@ resolve_collision :: (a: *KodaBody, b: *KodaBody, velocity: Vector3, dt: float) 
     for shape_a: a.shapes {
         for shape_b: b.shapes {
             if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
-                delta, normal := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, velocity, dt);
+                position, velocity, normal, delta := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, dt);
+                print("found potential at delta % / %\n", delta, dt);
                 if delta < minimum_delta {
                     minimum_delta = delta;
                     minimum_normal = normal;
@@ -87,54 +109,69 @@ resolve_collision :: (a: *KodaBody, b: *KodaBody, velocity: Vector3, dt: float) 
     return minimum_delta, minimum_normal;
 }
 
-resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, velocity: Vector3, dt: float) -> float, Vector3 {
-    current_delta := FLOAT32_MAX;
+resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, dt: float) -> Vector3, Vector3, Vector3, float {
+    max_position: Vector3;
+    max_velocity: Vector3;
+    max_normal: Vector3;
+    max_delta := dt;
 
-    minimum_delta := dt;
-    minimum_normal: Vector3;
-    minimum_triangle: Triangle3;
+    triangles := b_shape.mesh.triangles;
 
-    triangles := b.mesh.triangles;
+    // TODO convert the mesh aabb and stuff into body b space
+    assert(b.position == .{});
+    assert(b.rotation == .{});
+    assert(b.scale == .{1, 1, 1});
 
-    while minimum_delta < current_delta {
-        current_delta = minimum_delta;
+    position := a.position;
+    velocity := a.velocity;
+    a.position += velocity * dt;
+    body_end_aabb := get_world_aabb(a);
+    a.position = position;
 
-        position := a.position;
-        a.position += velocity * dt;
-        
-        body_aabb := get_world_aabb(a);
-        a.position = position;
+    body_start_aabb := get_world_aabb(a);
+    body_path_aabb := merge(body_start_aabb, body_end_aabb);
+    start_vertices := get_world_vertices(a, a_shape);
 
-        potential_triangles: [..] Triangle3;
-        defer array_free(potential_triangles);
+    potential_triangles: [..] Triangle3;
+    defer array_free(potential_triangles);
 
-        query(triangles, body_aabb, (triangle: Triangle3, potential_triangles: *[..] Triangle3) -> bool {
-            array_add(potential_triangles, triangle);
-        }, *potential_triangles);
+    QueryInfo :: struct {
+        potential_triangles: *[..] Triangle3;
+        start_vertices: *KodaVertices;
+        velocity: Vector3;
+    }
+    info: QueryInfo;
+    info.potential_triangles = *potential_triangles;
+    info.end_vertices = *a_end_vertices;
+    info.velocity = velocity * dt;
 
-        a_vertices := get_world_vertices(a, a_shape);
+    query(triangles, body_path_aabb, (triangle: Triangle3, info: QueryInfo) -> bool {
+        triangle_vertices: KodaVertices(3) = ---;
+        triangle_vertices.count = 3;
+        triangle_vertices[0] = triangle.a;
+        triangle_vertices[1] = triangle.b;
+        triangle_vertices[2] = triangle.c;
 
-        velocity_ray: Ray3 = ---;
-        velocity_ray.p = position;
-        velocity_ray.dir = normalize(velocity);
-        velocity_length := length(velocity);
+        if solve_gjk(triangle_vertices, info.start_vertices, velocity2 = info.velocity) {
+            array_add(info.potential_triangles, triangle);
+        }
 
-        transform := get_transform(a);
-        for triangle: potential_triangles {
-            // triangle_vertices: KodaVertices(3);
-            // triangle_vertices.count = 3;
-            // triangle_vertices[0] = Vector4.{triangle.a.x, triangle.a.y, triangle.a.z, 1,0};
+        return true;
+    }, info);
 
-            // triangle_a := (transform * Vector4.{triangle.a.x, triangle.a.y, triangle.a.z, 1.0}).xyz;
-            // triangle_b := (transform * Vector4.{triangle.b.x, triangle.b.y, triangle.b.z, 1.0}).xyz;
-            // triangle_c := (transform * Vector4.{triangle.z.x, triangle.z.y, triangle.z.z, 1.0}).xyz;
-            // triangle_a := transform_point(transform, triangle.a);
-            // triangle_b := transform_point(transform, triangle.b);
-            // triangle_c := transform_point(transform, triangle.c);
+    remaining_dt := dt;
+    while remaining_dt > 0 {
+        min_distance_squared := length(velocity * remaining_dt);
+        min_triangle_index := -1;
+        min_simplex: ComplexSimplex;
+        min_triangle_point: Vector3;
+        min_body_point: Vector3;
 
+        for i: 0..potential_triangles.count - 1 {
+            triangle := potential_triangles[i];
             triangle_normal := normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
             if dot(triangle_normal, velocity) >= 0 {
-                continue
+                continue;
             }
 
             triangle_vertices: KodaVertices(3);
@@ -142,25 +179,74 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
             triangle_vertices[0] = triangle.a;
             triangle_vertices[1] = triangle.b;
             triangle_vertices[2] = triangle.c;
-            if solve_gjk(triangle_vertices, a_vertices, resolve_completely = false) {
-                velocity_ray.p = get_support(a_vertices, -triangle_normal);
-                triangle_plane := create_plane3(triangle.a, triangle_normal);
+            start_collide, simplex, point1, point2 := solve_gjk(triangle_vertices, a_start_vertices, resolve_completely = true);
+            if start_collide {
+                print("Issue!! The starting body is overlapping the triangle.\n");
+                continue;
+            }
 
-                intersection, hit, t := intersection(triangle_plane, velocity_ray);
-                if hit {
-                    // have to check hit because t could be negative
-                    delta := t / velocity_length * dt;
-                    if delta < minimum_delta {
-                        minimum_delta = delta;
-                        minimum_normal = triangle_normal;
-                        minimum_triangle = triangle;
-                    }
+            distance_squared := distance_squared(point2, point2);
+            if distance_squared < min_distance_squared {
+                min_distance_squared = distance_squared;
+                min_triangle_index = i;
+                min_simplex = simplex;
+                min_triangle_point = point1;
+                min_body_point = point2;
+            }
+        }
+
+        if min_triangle_index >= 0 {
+            min_triangle := potential_triangles[min_triangle_index];
+            array_unordered_remove_by_index(*potential_triangles, min_triangle_index);
+
+            // vertex vertex treats vertex a as a plane
+            // segment vertex, I guess, treats the line as a plane facing the vertex
+            // plane vertex treats the plane as a planes
+            // but this can all be accomplished by creating a plane between the two nearest points
+            simplex1, simplex2 := resolve_simplex(min_simplex);
+            normal := normalize(min_body_point - min_triangle_point);
+            triangle_plane := create_plane3(min_triangle_point, normal);
+
+            
+        }
+
+
+
+        simplex1, simplex2 := resolve_simplex(simplex);
+
+        velocity_ray.p = get_support(a_start_vertices, -triangle_normal);
+        velocity_ray.dir = velocity_dir;
+        triangle_plane := create_plane3(triangle.a, triangle_normal);
+
+        intersection, hit, t := intersection(triangle_plane, velocity_ray);
+        if hit {
+            if t < velocity_length {
+                potential_remaining_delta := dt - t / velocity_length * dt;
+                if current_delta > reamining_delta {
+                    // testing a large epsilon value here
+                    remaining_position = intersection + (a.position - velocity_ray.p) + triangle_normal * 0.0001;
+                    remaining_velocity = project_direction(triangle_normal, it.velocity);
+                    remaining_normal = triangle_normal;
+                    reamining_delta = potential_remaining_delta;
                 }
             }
         }
     }
 
-    return minimum_delta, minimum_normal;
+    velocity_dir := normalize(velocity);
+
+    velocity_ray: Ray3 = ---;
+    velocity_ray.p = position;
+    velocity_ray.dir = velocity_dir;
+    velocity_length := length(velocity);
+
+    transform := get_transform(a);
+
+    if remaining_delta == 0 {
+        return .{}, .{}, .{}, dt;
+    }
+
+    return remaining_position, remaining_velocity, remaining_normal, reamining_delta;
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
@@ -182,3 +268,5 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
 allocated_bodies: BlockAllocator(KodaBody, 1024);
 // dynamic_bodies: [..] *KodaBody;
 tree_bodies: BoundingTree(*KodaBody);
+gravity: Vector3;
+physics_initialized: bool;

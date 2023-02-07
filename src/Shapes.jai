@@ -17,7 +17,7 @@ ShapeType :: enum {
 
 HullShape :: struct {
     vertices: KodaVertices;
-    faces: KodaIndices;
+    indices: KodaIndices;
 }
 
 MeshShape :: struct {
@@ -29,7 +29,7 @@ create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
     shape: KodaShape;
     shape.type = .ConvexHull;
     shape.hull.vertices.count = vertices.count;
-    shape.hull.faces.count = indices.count;
+    shape.hull.indices.count = indices.count;
 
     memcpy(shape.hull.vertices.fixed.data, vertices.data, vertices.count * size_of(Vector3));
     memcpy(shape.hull.indices.fixed.data, indices.data, indices.count * size_of(int));
@@ -91,13 +91,12 @@ create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
 }
 
 create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
-    assert(vertices.count <= MAX_VERTICES, "You cannot create a polygon with more than MAX_VERTICES.");
     shape: KodaShape;
     shape.type = .TriangleMesh;
     shape.mesh.triangles = create_bounding_tree(Triangle3);
 
     i := 0;
-    while i < indices.count {
+    while i < vertices.count {
         defer i += 3;
 
         a := vertices[i];
