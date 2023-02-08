@@ -10,12 +10,12 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
-solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
+solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}) -> bool, Simplex {
     simplex: Simplex;
     simplex.count = 1;
 
     direction := v1[0] - v2[0];
-    simplex.a = get_support(v2, direction) - get_support(v1, -direction);
+    simplex.a = get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1);
     direction = -simplex.a;
 
     #if GJK_DEBUG {
@@ -37,7 +37,7 @@ solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
 
     while true {
         #if GJK_DEBUG {
-            if step_debug(simplex, v1, v2, get_support(v2, direction) - get_support(v1, -direction)) {
+            if step_debug(simplex, v1, v2, get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1)) {
                 return false;
             }
         }
@@ -47,11 +47,11 @@ solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
         simplex.b = simplex.a;
         simplex.count += 1;
 
-        simplex.a = get_support(v2, direction) - get_support(v1, -direction);
+        simplex.a = get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1);
 
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}) {
-                return false;
+                return false, simplex;
             }
         }
 
@@ -60,7 +60,7 @@ solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
             #if GJK_DEBUG {
                 step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
             }
-            return false;
+            return false, simplex;
         }
 
         if simplex.count == {
@@ -77,16 +77,16 @@ solve_gjk_simple :: (v1: KodaVertices($N1), v2: KodaVertices($N2)) -> bool {
                     #if GJK_DEBUG {
                         step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
                     }
-                    return true;
+                    return true, simplex;
                 }
 
             case;
                 assert(false, "Invalid simplex dimension.");
-                return false;
+                return false, simplex;
         }
     }
 
-    return false;
+    return false, simplex;
 }
 
 #scope_file
@@ -185,7 +185,7 @@ solve_simplex4 :: (simplex: *Simplex, direction: Vector3) -> bool, Vector3 {
     return true, .{0, 0, 0};
 }
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
     largest_dot := dot(vertices[0], direction);
     largest_vertex := vertices[0];
     for i: 1..vertices.count - 1 {
@@ -195,6 +195,18 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
         if current_dot > largest_dot {
             largest_dot = current_dot;
             largest_vertex = vertex;
+        }
+    }
+
+    if dot(velocity, velocity) > 0 {
+        for i: 0..vertices.count - 1 {
+            vertex := vertices[i] + velocity;
+
+            current_dot := dot(vertex, direction);
+            if current_dot > largest_dot {
+                largest_dot = current_dot;
+                largest_vertex = vertex;
+            }
         }
     }
 

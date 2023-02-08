@@ -58,33 +58,42 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         gjk_debug_steps = 0;
     }
 
-    while true {
+    best_simplex: ComplexSimplex;
+    best_support_difference: float;
+    best_p: Vector3;
+
+    // if one triangle is unnecessarily huge, epsilon might not be large enough to check directional values against each other if its almost exactly touching
+    for i: 0..31 {
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}, .{0, 1000, 0}) {
                 return false, simplex, .{}, .{};
             }
         }
 
+        // solving direction from cross products gives much more accuracy than resolving from p
+        // resolving from p can result in infinite loops when epsilon is too small to check directional differences
         p: Vector3;
+        direction: Vector3;
         if simplex.count == {
             case 1;
                 p = simplex.a;
+                direction = -simplex.a;
 
             case 2;
-                p = solve_simplex2(*simplex);
+                p, direction = solve_simplex2(*simplex);
                 
             case 3;
-                p = solve_simplex3(*simplex);
+                p, direction = solve_simplex3(*simplex);
 
             case 4;
-                current_simplex := simplex;
-                p = solve_simplex4(*simplex);
-                if p == .{} {
-                    #if GJK_DEBUG {
-                        step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
-                    }
-                    return true, current_simplex, .{}, .{};
-                }
+                // current_simplex := simplex;
+                p, direction = solve_simplex4(*simplex);
+                // if p == .{} {
+                //     #if GJK_DEBUG {
+                //         step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
+                //     }
+                //     return true, current_simplex, .{}, .{};
+                // }
 
             case;
                 assert(false, "Invalid simplex dimension.");
@@ -94,15 +103,13 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         // checking if distance squared from p to 0 is less than epsilon rather than comparing it to 0
         // because I'm not entirely sure how it would work together with the tetrahedron cross product
         // check and the support point directional check below
-        // if dot(p, p) < EPSILON {
-        //     #if GJK_DEBUG {
-        //         step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
-        //     }
-        //     closest1, closest2 := get_local_points(simplex, p);
-        //     return true, simplex, closest1, closest2;
-        // }
-
-        direction = -p;
+        if length(p) < EPSILON {
+            #if GJK_DEBUG {
+                step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
+            }
+            // closest1, closest2 := get_local_points(simplex, p);
+            return true, simplex, .{}, .{};
+        }
 
         support1 := get_support(v1, -direction, velocity1);
         support2 := get_support(v2, direction, velocity2);
@@ -123,12 +130,24 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         }
 
         // if p is more than or equivalently extremal in the direction of the origin, we can't find a better support point
-        if dot(p, direction) >= dot(support, direction) - EPSILON {
+        // scaled_epsilon := length(support) * EPSILON;
+        // print("% >= %\n", dir_strength(p, direction), dir_strength(support, direction));
+        p_dir_strength := dir_strength(p, direction);
+        support_dir_strength := dir_strength(support, direction) - EPSILON;
+        if p_dir_strength >= support_dir_strength {
             #if GJK_DEBUG {
                 step_debug(simplex, v1, v2, p, support, true);
             }
             closest1, closest2 := get_local_points(simplex, p);
             return false, simplex, closest1, closest2;
+        }
+
+        // this solves the case where the objects are both very large and infinitely close to the each other (but not within epsilon)
+        // when the loop exits itll return the best simplex anyways
+        if support_dir_strength - p_dir_strength > best_support_difference {
+            best_support_difference = support_dir_strength - p_dir_strength;
+            best_simplex = simplex;
+            best_p = p;
         }
 
         assert(simplex.count < 4, "You cannot have a simplex that's a tetrahedron at this point.");
@@ -143,7 +162,8 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         simplex.a = support;
     }
 
-    return false, simplex, .{}, .{};
+    closest1, closest2 := get_local_points(best_simplex, best_p);
+    return false, best_simplex, closest1, closest2;
 }
 
 resolve_simplex :: (complex: ComplexSimplex) -> Simplex, Simplex {
@@ -201,7 +221,7 @@ resolve_simplex :: (complex: ComplexSimplex) -> Simplex, Simplex {
 // but I think the extremal directional check in the loop would prevent this, so you can never have an invalid simplex
 // so for that reason, I won't ever try to resolve any edge cases for invalid simplexes
 
-solve_simplex2 :: (simplex: *ComplexSimplex) -> Vector3 {
+solve_simplex2 :: (simplex: *ComplexSimplex) -> Vector3, Vector3 {
     ab := simplex.b - simplex.a;
     ao := -simplex.a;
 
@@ -209,15 +229,15 @@ solve_simplex2 :: (simplex: *ComplexSimplex) -> Vector3 {
         // the origin falls on the line
         // project the origin onto the line and return
         t := dot(ao, ab) / dot(ab, ab);
-        return simplex.a + t * ab;
+        return simplex.a + t * ab, cross(cross(ab, ao), ab);
     } else {
         // the origin is closer to a
         simplex.count = 1;
-        return simplex.a;
+        return simplex.a, ao;
     }
 }
 
-solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3 {
+solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3, Vector3 {
     abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
     ac := simplex.c - simplex.a;
     ao := -simplex.a;
@@ -229,18 +249,18 @@ solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3 {
             simplex.b_all = simplex.c_all;
             simplex.count = 2;
             t := dot(ao, ac) / dot(ac, ac);
-            return simplex.a + t * ac;
+            return simplex.a + t * ac, cross(cross(ac, ao), ac);
         } else {
             ab := simplex.b - simplex.a;
             if same_direction(ab, ao) {
                 // the origin is nearest to the line ab
                 simplex.count = 2;
                 t := dot(ao, ab) / dot(ab, ab);
-                return simplex.a + t * ab;
+                return simplex.a + t * ab, cross(cross(ab, ao), ab);
             } else {
                 // the origin is nearest to the point a
                 simplex.count = 1;
-                return simplex.a;
+                return simplex.a, ao;
             }
         }
     } else {
@@ -251,11 +271,11 @@ solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3 {
                 // the origin is nearest to the line ab
                 simplex.count = 2;
                 t := dot(ao, ab) / dot(ab, ab);
-                return simplex.a + t * ab;
+                return simplex.a + t * ab, cross(cross(ab, ao), ab);
             } else {
                 // the origin is nearest to the point a
                 simplex.count = 1;
-                return simplex.a;
+                return simplex.a, ao;
             }
         } else {
             if same_direction(abc, ao) {
@@ -274,7 +294,7 @@ solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3 {
                 denom := 1.0 / (va + vb + vc);
                 v := vb * denom;
                 w := vc * denom;
-                return simplex.a + ab * v + ac * w;
+                return simplex.a + ab * v + ac * w, abc;
             } else {
                 // the origin is nearest to the triangle acb
                 simplex.b_all, simplex.c_all = swap(simplex.b_all, simplex.c_all);
@@ -292,13 +312,13 @@ solve_simplex3 :: (simplex: *ComplexSimplex) -> Vector3 {
                 denom := 1.0 / (va + vb + vc);
                 v := vb * denom;
                 w := vc * denom;
-                return simplex.a + ab * v + ac * w;
+                return simplex.a + ab * v + ac * w, -abc;
             }
         }
     }
 }
 
-solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
+solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3, Vector3 {
     abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
     acd := cross(simplex.c - simplex.a, simplex.d - simplex.a);
     adb := cross(simplex.d - simplex.a, simplex.b - simplex.a);
@@ -310,13 +330,14 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
 
     if !abc_dir && !acd_dir && !adb_dir {
         // the origin is inside the simplex
-        return .{0, 0, 0};
+        return .{0, 0, 0}, .{0, 0, 0};
     }
 
     if abc_dir && !acd_dir && !adb_dir {
         // the origin falls somewhere near abc
         simplex.count = 3;
-        return solve_simplex3(simplex);
+        p, dir := solve_simplex3(simplex);
+        return p, dir;
     }
 
     if !abc_dir && acd_dir && !adb_dir {
@@ -324,7 +345,8 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
         simplex.b_all = simplex.c_all;
         simplex.c_all = simplex.d_all;
         simplex.count = 3;
-        return solve_simplex3(simplex);
+        p, dir := solve_simplex3(simplex);
+        return p, dir;
     }
 
     if !abc_dir && !acd_dir && adb_dir {
@@ -332,7 +354,8 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
         simplex.c_all = simplex.b_all;
         simplex.b_all = simplex.d_all;
         simplex.count = 3;
-        return solve_simplex3(simplex);
+        p, dir := solve_simplex3(simplex);
+        return p, dir;
     }
 
     // the origin potentially falls on multiple triangles
@@ -349,9 +372,9 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
     simplex_adb.b_all = simplex_adb.d_all;
     simplex_adb.count = 3;
 
-    p_abc := solve_simplex3(*simplex_abc);
-    p_acd := solve_simplex3(*simplex_acd);
-    p_adb := solve_simplex3(*simplex_adb);
+    p_abc, dir_abc := solve_simplex3(*simplex_abc);
+    p_acd, dir_acd := solve_simplex3(*simplex_acd);
+    p_adb, dir_adb := solve_simplex3(*simplex_adb);
 
     abc_d2 := dot(p_abc, p_abc);
     acd_d2 := dot(p_acd, p_acd);
@@ -359,19 +382,19 @@ solve_simplex4 :: (simplex: *ComplexSimplex) -> Vector3 {
 
     if abc_d2 <= acd_d2 && abc_d2 <= adb_d2 {
         << simplex = simplex_abc;
-        return p_abc;
+        return p_abc, dir_abc;
     } else if acd_d2 <= abc_d2 && acd_d2 <= adb_d2 {
         << simplex = simplex_acd;
-        return p_acd;
+        return p_acd, dir_acd;
     } else if adb_d2 <= abc_d2 && adb_d2 <= acd_d2 {
         << simplex = simplex_adb;
-        return p_adb;
+        return p_adb, dir_adb;
     }
 
     assert(false, "This shouldn't be reachable.");
 
     // the origin isn't outside of any plane, so it's inside the tretrahedron
-    return .{0, 0, 0};
+    return .{0, 0, 0}, .{0, 0, 0};
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
@@ -404,6 +427,22 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector
 
 same_direction :: (a: Vector3, b: Vector3) -> bool {
     return dot(a, b) > 0;
+}
+
+dir_strength :: (v: Vector3, direction: Vector3) -> float {
+    vx: float64 = v.x;
+    vy: float64 = v.y;
+    vz: float64 = v.z;
+    dx: float64 = direction.x;
+    dy: float64 = direction.y;
+    dz: float64 = direction.z;
+    return cast(float) (vx * dx + vy * dy + vz * dz);
+    // we need to get the normal in the direction of v around the direction line
+    // vo := -v;
+    // normal := cross(cross(direction, vo), direction);
+    // projected := v - dot(normal, v) * normal;
+    // print("should be approx same % %\n", dot(projected, direction), dot(v, direction));
+    // return dot(projected, direction);
 }
 
 get_local_points :: (simplex: ComplexSimplex, p: Vector3) -> Vector3, Vector3 {

@@ -1,5 +1,5 @@
 
-solve_epa :: (a: KodaVertices, b: KodaVertices, simplex: Simplex) -> bool, Vector3 {
+solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> bool, Vector3 {
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;
@@ -111,7 +111,7 @@ solve_epa :: (a: KodaVertices, b: KodaVertices, simplex: Simplex) -> bool, Vecto
 
 #scope_file
 
-get_support :: (vertices: KodaVertices, direction: Vector3) -> Vector3 {
+get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
     if vertices.count == 0 {
         return .{};
     }
