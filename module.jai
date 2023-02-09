@@ -1,9 +1,9 @@
 #load "src/Body.jai";
 #load "src/ComplexNormals.jai";
-#load "src/Core.jai";
+#load "src/Dtr.jai";
 #load "src/Epa.jai";
 #load "src/Gjk.jai";
-#load "src/GjkSimple.jai";
+#load "src/GjkComplex.jai";
 #load "src/Indices.jai";
 #load "src/Pce.jai";
 #load "src/Shapes.jai";
@@ -17,3 +17,4 @@
 #import "JaiMath";
 #import "BlockAllocatorJai";
 #import "Math";
+#import "Basic";

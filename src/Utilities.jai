@@ -33,7 +33,4 @@ push_temporary_context :: () #expand {
     defer context.allocator = old_allocator;
 }
 
-#scope_file
-
-#import "Basic";
-#import "JaiMath";
+#scope_export

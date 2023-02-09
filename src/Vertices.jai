@@ -49,3 +49,5 @@ get_view :: (vertices: *KodaVertices) -> [] Vector3 {
 }
 
 MAX_VERTICES :: 1024;
+
+#scope_export

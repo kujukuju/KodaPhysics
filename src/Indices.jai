@@ -55,3 +55,5 @@ get_view :: (indices: *KodaIndices) -> [] int {
     view.count = indices.count;
     return view;
 }
+
+#scope_export

@@ -1,5 +1,5 @@
 
-solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> bool, Vector3 {
+solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> Vector3 {
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;
@@ -41,7 +41,7 @@ solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> b
         p := get_support(b, search_dir) - get_support(a, -search_dir);
 
         if dot(p, search_dir) - min_dist < TOLERANCE {
-            return true, faces[closest_face][3] * dot(p, search_dir);
+            return faces[closest_face][3] * dot(p, search_dir);
         }
 
         loose_edges: [MAX_LOOSE_EDGES][2] Vector3;
@@ -106,7 +106,7 @@ solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> b
         }
     }
 
-    return true, faces[closest_face][3] * dot(faces[closest_face][0], faces[closest_face][3]);
+    return faces[closest_face][3] * dot(faces[closest_face][0], faces[closest_face][3]);
 }
 
 #scope_file
@@ -130,3 +130,5 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
 
     return largest_vertex;
 }
+
+#scope_export

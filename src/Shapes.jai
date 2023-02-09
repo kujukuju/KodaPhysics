@@ -132,4 +132,4 @@ create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
     return shape;
 }
 
-#scope_file
+#scope_export

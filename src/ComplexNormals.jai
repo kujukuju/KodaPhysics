@@ -47,3 +47,5 @@ get_view :: (complex_normals: *KodaComplexNormals) -> [] Vector4 {
     view.count = complex_normals.count;
     return view;
 }
+
+#scope_export

@@ -137,3 +137,5 @@ get_world_vertices :: (body: KodaBody, shape: KodaShape) -> KodaVertices(MAX_VER
 
     return vertices;
 }
+
+#scope_export
