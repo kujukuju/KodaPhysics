@@ -7,6 +7,7 @@ KodaBody :: struct {
     velocity: Vector3;
     rotation: Quaternion;
     scale: Vector3 = .{1, 1, 1};
+    gravity_strength: float = 1.0;;
 
     dirty_position: Vector3;
     // dirty_velocity: Vector3;

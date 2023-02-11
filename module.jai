@@ -2,6 +2,7 @@
 #load "src/ComplexNormals.jai";
 #load "src/Dtr.jai";
 #load "src/Epa.jai";
+#load "src/EpaDirectional.jai";
 #load "src/Gjk.jai";
 #load "src/GjkComplex.jai";
 #load "src/Indices.jai";

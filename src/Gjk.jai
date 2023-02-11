@@ -11,6 +11,8 @@ Simplex :: struct {
 }
 
 solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}) -> bool, Simplex {
+    MAX_ITERATIONS :: 32;
+
     simplex: Simplex;
     simplex.count = 1;
 
@@ -35,7 +37,7 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         gjk_debug_steps = 0;
     }
 
-    while true {
+    for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1)) {
                 return false;
