@@ -179,7 +179,16 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     triangle_vertices[2] = triangle.c;
 
     triangle_normal := normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
-    resolve_vector := solve_epa(triangle_vertices, body_vertices, simplex);
+    resolve_vector: Vector3;
+    if is_ground(triangle_normal) {
+        resolve_vector = solve_gjk_dir(triangle_vertices, body_vertices, simplex, .{0, 1, 0});
+        if resolve_vector.y > 0.5 {
+            resolve_vector = solve_epa(triangle_vertices, body_vertices, simplex);
+        }
+        // print("ground resolve %\n", resolve_vector);
+    } else {
+        resolve_vector = solve_epa(triangle_vertices, body_vertices, simplex);
+    }
     // resolve_vector, resolve_point := solve_dtr(triangle, body_vertices);
     if length_squared(resolve_vector) == 0 {
         return .{}, .{}, .{}, .{};
@@ -205,6 +214,10 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
     }
 
     return largest_vertex;
+}
+
+is_ground :: (normal: Vector3) -> bool {
+    return dot(normal, .{0, 1, 0}) >= 0.75;
 }
 
 allocated_bodies: BlockAllocator(KodaBody, 1024);
