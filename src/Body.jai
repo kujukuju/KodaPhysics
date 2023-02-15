@@ -15,6 +15,8 @@ KodaBody :: struct {
     dirty_scale: Vector3 = .{1, 1, 1};
 
     collision_normals: [..] Vector3;
+    ground_enabled: bool = true;
+    step_height: float = 0.4;
 
     proxy: int = -1;
 }

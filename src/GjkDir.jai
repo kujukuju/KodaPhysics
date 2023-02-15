@@ -125,7 +125,6 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 c := simplex.c;
                 abc := cross(b - a, c - a);
 
-                
                 #if GJK_DIR_DEBUG {
                     if step_debug(simplex, v1, v2, .{0, 0, 0}) {
                         return .{};
@@ -185,7 +184,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
     }
 
     // this loop takes the triangle with the ray inside and continues pushing forward until it's reached the end
-    while true {
+    for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DIR_DEBUG {
             if step_debug(simplex, v1, v2, search_direction) {
                 return .{};
@@ -218,7 +217,6 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
             }
         }
         a := get_support(v2, search_direction) - get_support(v1, -search_direction);
-
         
         #if GJK_DIR_DEBUG {
             if step_debug(simplex, v1, v2, search_direction) {
@@ -333,7 +331,7 @@ step_debug :: (simplex: Simplex, v1: KodaVertices($N1), v2: KodaVertices($N2), d
     if gjk_dir_debug_steps >= gjk_dir_debug_max_steps || force_draw {
         #import "KodaJai";
 
-        print_stack_trace();
+        // print_stack_trace();
 
         draw_text(tprint("Directional Step: %", gjk_dir_debug_steps), .{400, 80});
 

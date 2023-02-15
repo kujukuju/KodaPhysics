@@ -22,7 +22,8 @@ step_physics :: (dt: float) {
     push_temporary_context();
 
     potential_collisions: [..] *KodaBody;
-    collide_history: [..] CollideHistory;
+    body_history: [..] CollideHistory;
+    triangle_history: [..] Triangle3;
 
     for *a: allocated_bodies {
         if a.type != .Dynamic {
@@ -34,9 +35,20 @@ step_physics :: (dt: float) {
             continue;
         }
 
+
+        {
+            // just test code for now, if youre moving faster than half your aabb you could potentially clip
+            body_aabb := get_world_aabb(a);
+            aabb_dim := body_aabb.upper - body_aabb.lower;
+            if length(a.velocity) >= min(aabb_dim.x, min(aabb_dim.y, aabb_dim.z)) / 2.0 {
+                print("Clip warning! Needs to be a convex hull or treat the body as a bullet!\n");
+            }
+        }
+
         a.position += a.velocity * dt;
 
-        collide_history.count = 0;
+        body_history.count = 0;
+        triangle_history.count = 0;
 
         // TODO go through and group all bodies into groups depending on velocity spheres and step them together
         // TODO this also allows you to multithread, I guess? maybe collision steps are also independent in which
@@ -58,42 +70,35 @@ step_physics :: (dt: float) {
                 return true;
             }, *potential_collisions);
 
-            // largest_position: Vector3;
-            // largest_velocity: Vector3;
-            // largest_normal: Vector3;
+            largest_resolve: Vector3;
+            largest_is_triangle: bool;
+            largest_triangle: Triangle3;
+            largest_is_ground: bool;
             for b: potential_collisions {
                 for index_b: 0..b.shapes.count - 1 {
                     shape_b := b.shapes[index_b];
 
-                    current_entry := find_history(*collide_history, b, index_b);
-                    if shape_b.type != .TriangleMesh && current_entry {
-                        continue;
-                    }
-
-                    // at this point if there is a current entry then we know it's a triangle mesh
+                    // TODO dont need this until we support static convex hulls
+                    // if !valid_body(body_history, b, index_b) {
+                    //     continue;
+                    // }
 
                     for index_a: 0..a.shapes.count - 1 {
                         shape_a := a.shapes[index_a];
 
                         if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
-                            triangle_history: [..] Triangle3;
-                            if current_entry {
-                                triangle_history = current_entry.triangle_history;
-                            }
-                            position, velocity, normal, triangle := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
-                            if length_squared(normal) > 0 {
-                                if !current_entry {
-                                    current_entry = array_add(*collide_history);
-                                    current_entry.body = b;
-                                    current_entry.shape_index = index_b;
+                            resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+                            if length_squared(resolve) > 0 {
+                                should_replace := false;
+                                should_replace = should_replace || (ground && !largest_is_ground);
+                                should_replace = should_replace || (ground && largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
+                                should_replace = should_replace || (!ground && !largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
+                                if should_replace {
+                                    largest_resolve = resolve;
+                                    largest_is_triangle = true;
+                                    largest_triangle = triangle;
+                                    largest_is_ground = ground;
                                 }
-
-                                array_add(*current_entry.triangle_history, triangle);
-
-                                a.position = position;
-                                a.velocity = velocity;
-                                had_collision = true;
-                                continue collision_loop;
                             }
                         } else {
                             print("Unhandled collision combination. % %\n", shape_a.type, shape_b.type);
@@ -101,6 +106,19 @@ step_physics :: (dt: float) {
                         }
                     }
                 }
+            }
+
+            if length_squared(largest_resolve) > 0 {
+                a.position = a.position + largest_resolve;
+                resolve_normal := normalize(largest_resolve);
+                if dot(a.velocity, resolve_normal) < 0 {
+                    a.velocity = project_direction(resolve_normal, a.velocity);
+                }
+                triangle_normal := normalize(cross(largest_triangle.b - largest_triangle.a, largest_triangle.c - largest_triangle.a));
+                if largest_is_triangle {
+                    array_add(*triangle_history, largest_triangle);
+                }
+                had_collision = true;
             }
         }
     }
@@ -116,7 +134,7 @@ set_gravity :: (g: Vector3) {
 
 #scope_module
 
-resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, triangle_history: [..] Triangle3) -> Vector3, Vector3, Vector3, Triangle3 {
+resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, triangle_history: [..] Triangle3) -> Vector3, Triangle3, bool {
     body_aabb := get_world_aabb(a);
     body_vertices := get_world_vertices(a, a_shape);
 
@@ -127,77 +145,149 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     triangles := b_shape.mesh.triangles;
 
     triangle: Triangle3;
-    simplex: Simplex;
+    // triangle_normal: Vector3;
+    // triangle_d: float;
+    resolve_vector: Vector3;
+    resolve_depth_squared: float;
+    resolve_ground: bool;
     found_triangle: bool;
 
     QueryInfo :: struct {
         triangle: *Triangle3;
-        simplex: *Simplex;
-        maximum_depth: float;
+        // triangle_normal: *Vector3;
+        // triangle_d: *float;
+        resolve_vector: *Vector3;
+        resolve_depth_squared: *float;
+        resolve_ground: *bool;
         found_triangle: *bool;
         body_vertices: *KodaVertices;
+        step_height: float;
+        velocity: Vector3;
         triangle_history: [..] Triangle3;
     }
     info: QueryInfo;
     info.triangle = *triangle;
-    info.simplex = *simplex;
+    // info.triangle_normal = *triangle_normal;
+    // info.triangle_d = *triangle_d;
+    info.resolve_vector = *resolve_vector;
+    info.resolve_depth_squared = *resolve_depth_squared;
+    info.resolve_ground = *resolve_ground;
     info.found_triangle = *found_triangle;
     info.body_vertices = *body_vertices;
+    info.step_height = a.step_height;
+    info.velocity = a.velocity;
     info.triangle_history = triangle_history;
 
-    query(triangles, body_aabb, (triangle: Triangle3, info: QueryInfo) -> bool {
-        if find_triangle(info.triangle_history, triangle) {
+    if a.ground_enabled {
+        query(triangles, body_aabb, (triangle: Triangle3, info: QueryInfo) -> bool {
+            if !valid_triangle(info.triangle_history, triangle) {
+                return true;
+            }
+
+            triangle_normal_unscaled := cross(triangle.b - triangle.a, triangle.c - triangle.a);
+            if dot(triangle_normal_unscaled, info.velocity) >= 0 {
+                return true;
+            }
+
+            triangle_vertices: KodaVertices(3) = ---;
+            triangle_vertices.count = 3;
+            triangle_vertices[0] = triangle.a;
+            triangle_vertices[1] = triangle.b;
+            triangle_vertices[2] = triangle.c;
+
+            collide, simplex := solve_gjk(triangle_vertices, << info.body_vertices);
+            if collide {
+                triangle_normal := normalize(triangle_normal_unscaled);
+                if is_ground(triangle_normal) {
+                    resolve_vector := solve_gjk_dir(triangle_vertices, << info.body_vertices, simplex, .{0, 1, 0});
+                    if resolve_vector.y <= info.step_height {
+                        if (<< info.resolve_ground) {
+                            // if we already have a ground resolution we have to be sure this one is better
+                            if resolve_vector.y > info.resolve_vector.y {
+                                << info.triangle = triangle;
+                                // << info.triangle_normal = .{};
+                                // << info.triangle_d = 0.0;
+                                << info.resolve_vector = resolve_vector;
+                                << info.resolve_depth_squared = length_squared(resolve_vector);
+                                << info.resolve_ground = true;
+                                << info.found_triangle = true;
+                            }
+                        } else {
+                            // if we don't already have a ground resolution then use this
+                            << info.triangle = triangle;
+                            // << info.triangle_normal = .{};
+                            // << info.triangle_d = 0.0;
+                            << info.resolve_vector = resolve_vector;
+                            << info.resolve_depth_squared = length_squared(resolve_vector);
+                            << info.resolve_ground = true;
+                            << info.found_triangle = true;
+                        }
+                    } else if !(<< info.resolve_ground) {
+                        // we don't bother with non-step collisions if we've already found a step
+                        // we can only find a larger step at this point
+                        resolve_vector = solve_epa(triangle_vertices, << info.body_vertices, simplex);
+                        resolve_depth_squared := length_squared(resolve_vector);
+                        if resolve_depth_squared > (<< info.resolve_depth_squared) {
+                            << info.triangle = triangle;
+                            // << info.triangle_normal = .{};
+                            // << info.triangle_d = 0.0;
+                            << info.resolve_vector = resolve_vector;
+                            << info.resolve_depth_squared = resolve_depth_squared;
+                            << info.found_triangle = true;
+                        }
+                    }
+                } else {
+                    // the normal of this triangle doesn't qualify it to be treated as ground
+                    resolve_vector := solve_epa(triangle_vertices, << info.body_vertices, simplex);
+                    resolve_depth_squared := length_squared(resolve_vector);
+                    if resolve_depth_squared > (<< info.resolve_depth_squared) {
+                        << info.triangle = triangle;
+                        // << info.triangle_normal = .{};
+                        // << info.triangle_d = 0.0;
+                        << info.resolve_vector = resolve_vector;
+                        << info.resolve_depth_squared = resolve_depth_squared;
+                        << info.found_triangle = true;
+                    }
+                }
+            }
+
             return true;
-        }
+        }, info);
+    } else {
+        query(triangles, body_aabb, (triangle: Triangle3, info: QueryInfo) -> bool {
+            if !valid_triangle(info.triangle_history, triangle) {
+                return true;
+            }
 
-        triangle_vertices: KodaVertices(3) = ---;
-        triangle_vertices.count = 3;
-        triangle_vertices[0] = triangle.a;
-        triangle_vertices[1] = triangle.b;
-        triangle_vertices[2] = triangle.c;
+            triangle_vertices: KodaVertices(3) = ---;
+            triangle_vertices.count = 3;
+            triangle_vertices[0] = triangle.a;
+            triangle_vertices[1] = triangle.b;
+            triangle_vertices[2] = triangle.c;
 
-        collide, simplex := solve_gjk(triangle_vertices, << info.body_vertices);
-        if collide {
-            << info.triangle = triangle;
-            << info.simplex = simplex;
-            << info.found_triangle = true;
+            collide, simplex := solve_gjk(triangle_vertices, << info.body_vertices);
+            if collide {
+                resolve_vector := solve_epa(triangle_vertices, << info.body_vertices, simplex);
+                resolve_depth_squared := length_squared(resolve_vector);
+                if resolve_depth_squared > (<< info.resolve_depth_squared) {
+                    << info.triangle = triangle;
+                    // << info.triangle_normal = .{};
+                    // << info.triangle_d = 0.0;
+                    << info.resolve_vector = resolve_vector;
+                    << info.resolve_depth_squared = resolve_depth_squared;
+                    << info.found_triangle = true;
+                }
+            }
 
-            return false;
-        }
-
-        return true;
-    }, info);
+            return true;
+        }, info);
+    }
 
     if !found_triangle {
-        return .{}, .{}, .{}, .{};
+        return .{}, .{}, false;
     }
 
-    triangle_vertices: KodaVertices(3) = ---;
-    triangle_vertices.count = 3;
-    triangle_vertices[0] = triangle.a;
-    triangle_vertices[1] = triangle.b;
-    triangle_vertices[2] = triangle.c;
-
-    triangle_normal := normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
-    resolve_vector: Vector3;
-    if is_ground(triangle_normal) {
-        resolve_vector = solve_gjk_dir(triangle_vertices, body_vertices, simplex, .{0, 1, 0});
-        if resolve_vector.y > 0.5 {
-            resolve_vector = solve_epa(triangle_vertices, body_vertices, simplex);
-        }
-        // print("ground resolve %\n", resolve_vector);
-    } else {
-        resolve_vector = solve_epa(triangle_vertices, body_vertices, simplex);
-    }
-    // resolve_vector, resolve_point := solve_dtr(triangle, body_vertices);
-    if length_squared(resolve_vector) == 0 {
-        return .{}, .{}, .{}, .{};
-    }
-
-    solved_position := a.position + resolve_vector;
-    solved_velocity := project_direction(normalize(resolve_vector), a.velocity);
-
-    return solved_position, solved_velocity, triangle_normal, triangle;
+    return resolve_vector, triangle, resolve_ground;
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
@@ -217,7 +307,8 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
 }
 
 is_ground :: (normal: Vector3) -> bool {
-    return dot(normal, .{0, 1, 0}) >= 0.75;
+    return dot(normal, .{0, 1, 0}) >= 0.85;
+    // return dot(normal, .{0, 1, 0}) >= 0.75;
 }
 
 allocated_bodies: BlockAllocator(KodaBody, 1024);
@@ -231,31 +322,90 @@ physics_initialized: bool;
 CollideHistory :: struct {
     body: *KodaBody;
     shape_index: int;
-    triangle_history: [..] Triangle3;
+}
+
+NormalHistory :: struct {
+    normal: Vector3;
+    d: float;
 }
 
 operator == :: (a: CollideHistory, b: CollideHistory) -> bool {
     return a.body == b.body && a.shape_index == b.shape_index;
 }
 
-find_history :: (history: *[..] CollideHistory, body: *KodaBody, shape_index: int) -> *CollideHistory {
-    for *entry: << history {
+valid_body :: (history: [..] CollideHistory, body: *KodaBody, shape_index: int) -> bool {
+    for entry: history {
         if entry.body == body && entry.shape_index == shape_index {
-            return entry;
+            return false;
         }
     }
 
-    return null;
+    return true;
 }
 
-find_triangle :: (history: [..] Triangle3, triangle: Triangle3) -> bool {
+valid_triangle :: (history: [..] Triangle3, triangle: Triangle3) -> bool {
     for entry: history {
         if entry == triangle {
-            return true;
+            return false;
         }
     }
 
-    return false;
+    return true;
+}
+
+get_restricted_vector :: (resolve: Vector3, normals: [..] Vector3) -> Vector3, Vector3 {
+    // before you do this I think you have to solve all stair step collisions
+    // then from this new position get all collisions
+    // you can add together all resolution vectors of all collisions to get the new displacement direction
+
+    // basically set up each normal as a plane with the origin at 0,0,0
+    // take the resolve vector as a plane set up at 0,0,0
+    // move the resolve plane forward by the resolve vector distance
+    // project the new resolve position onto the nearest feature of the new plane collisions
+    // this would work, but I think there's a better way
+
+    // only consider planes whos normals are against the resolve vector
+    // build out the list of all planes in some winding order around resolve vector
+    // each adjacent plane should make a line intersection with each other
+    // sort these into the list
+    // project the resolve vector onto each of these restrictions
+
+    RestrictionType :: enum {
+        Plane;
+        Line;
+    }
+
+    Restriction :: struct {
+        type: RestrictionType;
+        direction: Vector3;
+        union {
+
+        } 
+    }
+
+    restrictions: [..] Restriction;
+
+    // this is extremely hard to figure out analytically like this
+    // so I think I just need to construct the simplex that contains the resolve vector using the intersection of the planes
+    // then find the nearest feature to the resolve vector, whether it's a line or a plane (or a point?)
+    // I think ray directions are only allowed to go in the normal direction of the planes that are intersecting
+
+    // you have your new resolve vector
+    // get all the normals that are against the resolve vector
+    // get the intersection shape of all those planes
+    // get the dot product between your resolve vector and the resulting shape
+
+    // we keep track of currently restricted normals
+    // we only consider new normals that are going against our velocity
+    // if we find a new velocity, if that velocity is going against every previously restricted normal we stop
+
+    // we shouldn't possibly have to iterate more than n^2 times
+
+    for limit: 0..normals.count - 1 {
+        for i: 0..normals.count - 1 {
+
+        }
+    }
 }
 
 #scope_export
