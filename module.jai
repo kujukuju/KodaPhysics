@@ -6,6 +6,7 @@
 #load "src/GjkComplex.jai";
 #load "src/GjkDir.jai";
 #load "src/Indices.jai";
+#load "src/MatrixMath.jai";
 #load "src/Pce.jai";
 #load "src/Shapes.jai";
 #load "src/Utilities.jai";

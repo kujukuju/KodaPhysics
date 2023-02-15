@@ -21,9 +21,15 @@ step_physics :: (dt: float) {
 
     push_temporary_context();
 
+    Penetration :: struct {
+        normal: Vector3;
+        d: float;
+    }
+
     potential_collisions: [..] *KodaBody;
     body_history: [..] CollideHistory;
     triangle_history: [..] Triangle3;
+    penetrations: [..] Penetration;
 
     for *a: allocated_bodies {
         if a.type != .Dynamic {
@@ -34,8 +40,6 @@ step_physics :: (dt: float) {
         if length_squared(a.velocity) == 0 {
             continue;
         }
-
-
         {
             // just test code for now, if youre moving faster than half your aabb you could potentially clip
             body_aabb := get_world_aabb(a);
@@ -49,16 +53,10 @@ step_physics :: (dt: float) {
 
         body_history.count = 0;
         triangle_history.count = 0;
-
-        // TODO go through and group all bodies into groups depending on velocity spheres and step them together
-        // TODO this also allows you to multithread, I guess? maybe collision steps are also independent in which
-        // TODO case you can multithread everything
-
-        // this can be a direct check of 0 without any epsilon because the resolve collision function will return dt if no collision is found
-        had_collision := true;
-        while collision_loop := had_collision {
-            had_collision = false;
-
+        penetrations.count = 0;
+        
+        // go through 1 loop to solve for all stair steps if this body can stair step
+        if a.ground_enabled && a.step_height > 0 {
             body_aabb := get_world_aabb(a);
 
             potential_collisions.count = 0;
@@ -70,57 +68,215 @@ step_physics :: (dt: float) {
                 return true;
             }, *potential_collisions);
 
-            largest_resolve: Vector3;
-            largest_is_triangle: bool;
+            largest_step: float;
             largest_triangle: Triangle3;
-            largest_is_ground: bool;
             for b: potential_collisions {
                 for index_b: 0..b.shapes.count - 1 {
                     shape_b := b.shapes[index_b];
-
-                    // TODO dont need this until we support static convex hulls
-                    // if !valid_body(body_history, b, index_b) {
-                    //     continue;
-                    // }
 
                     for index_a: 0..a.shapes.count - 1 {
                         shape_a := a.shapes[index_a];
 
                         if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
                             resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
-                            if length_squared(resolve) > 0 {
-                                should_replace := false;
-                                should_replace = should_replace || (ground && !largest_is_ground);
-                                should_replace = should_replace || (ground && largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
-                                should_replace = should_replace || (!ground && !largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
-                                if should_replace {
-                                    largest_resolve = resolve;
-                                    largest_is_triangle = true;
+                            if ground {
+                                resolve_length := length(resolve);
+                                if resolve_length > largest_step {
+                                    largest_step = resolve_length;
                                     largest_triangle = triangle;
-                                    largest_is_ground = ground;
                                 }
                             }
                         } else {
-                            print("Unhandled collision combination. % %\n", shape_a.type, shape_b.type);
                             assert(false, "Unhandled collision combination.");
                         }
                     }
                 }
             }
 
-            if length_squared(largest_resolve) > 0 {
-                a.position = a.position + largest_resolve;
-                resolve_normal := normalize(largest_resolve);
-                if dot(a.velocity, resolve_normal) < 0 {
-                    a.velocity = project_direction(resolve_normal, a.velocity);
-                }
+            if largest_step > 0 {
                 triangle_normal := normalize(cross(largest_triangle.b - largest_triangle.a, largest_triangle.c - largest_triangle.a));
-                if largest_is_triangle {
-                    array_add(*triangle_history, largest_triangle);
-                }
-                had_collision = true;
+                penetration := array_add(*penetrations);
+                penetration.normal = triangle_normal;
+                penetration.d = 0.0;
+
+                a.position += largest_step * Vector3.{0, 1, 0};
+                // TODO really this should be something based on the triangle normal if its a ground triangle
+                a.velocity.y = 0.0;
             }
         }
+
+        body_aabb := get_world_aabb(a);
+
+        // now we need to add all penetration vectors into the list
+        potential_collisions.count = 0;
+        query(tree_bodies, body_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
+            if p.type == .Static {
+                array_add(potential_collisions, p);
+            }
+
+            return true;
+        }, *potential_collisions);
+
+        for b: potential_collisions {
+            for index_b: 0..b.shapes.count - 1 {
+                shape_b := b.shapes[index_b];
+
+                for index_a: 0..a.shapes.count - 1 {
+                    shape_a := a.shapes[index_a];
+
+                    if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
+                        resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+                        if length_squared(resolve) > 0 {
+                            penetration := array_add(*penetrations);
+                            penetration.normal = normalize(resolve);
+                            penetration.d = dot(resolve, penetration.normal);
+                        }
+                    } else {
+                        assert(false, "Unhandled collision combination.");
+                    }
+                }
+            }
+        }
+
+        // now we solve all the penetrations
+        // we could use least squares matrix method
+        // but since we want an exact solution if possible
+        // and we probably don't have many collisions we can use gaussian
+        // and expand the dimension of the resolution vector with empty data
+        // vx * p1x + vy * p1y + vz * p1z = d1
+        // vx * p2x + vy * p2y + vz * p2z = d2
+
+        pen_count := max(penetrations.count, 3);
+
+        print("penetrations %\n", penetrations);
+
+        matrix: Matrix;
+        resize(*matrix, pen_count, pen_count);
+        rhs: [..] float;
+        array_resize(*rhs, pen_count);
+        for i: 0..penetrations.count - 1 {
+            penetration := penetrations[i];
+            matrix[index(matrix, i, 0)] = penetration.normal.x;
+            matrix[index(matrix, i, 1)] = penetration.normal.y;
+            matrix[index(matrix, i, 2)] = penetration.normal.z;
+            rhs[i] = penetration.d;
+        }
+
+        resolution := solve_gaussian_elim(matrix, rhs);
+        print("result %\n", resolution);
+        
+        a.position.x += resolution[0];
+        a.position.y += resolution[1];
+        a.position.z += resolution[2];
+
+        // largest_step: float;
+        // largest_triangle: Triangle3;
+        // for b: potential_collisions {
+        //     for index_b: 0..b.shapes.count - 1 {
+        //         shape_b := b.shapes[index_b];
+
+        //         // TODO dont need this until we support static convex hulls
+        //         // if !valid_body(body_history, b, index_b) {
+        //         //     continue;
+        //         // }
+
+        //         for index_a: 0..a.shapes.count - 1 {
+        //             shape_a := a.shapes[index_a];s
+
+        //             if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
+        //                 resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+        //                 if ground {
+        //                     resolve_length := length(resolve);
+        //                     if resolve_length > largest_stair {
+        //                         largest_step = resolve_length;
+        //                         largest_triangle = triangle;
+        //                     }
+        //                 }
+        //             } else {
+        //                 assert(false, "Unhandled collision combination.");
+        //             }
+        //         }
+        //     }
+        // }
+
+        // if largest_step > 0 {
+        //     triangle_normal := normalize(cross(largest_triangle.b - largest_triangle.a, largest_triangle.c - largest_triangle.a));
+        //     penetration := array_add(*penetrations);
+        //     penetration.normal = triangle_normal;
+        //     penetration.d = 0.0;
+        // }
+
+        // TODO go through and group all bodies into groups depending on velocity spheres and step them together
+        // TODO this also allows you to multithread, I guess? maybe collision steps are also independent in which
+        // TODO case you can multithread everything
+
+        // this can be a direct check of 0 without any epsilon because the resolve collision function will return dt if no collision is found
+        // had_collision := true;
+        // while collision_loop := had_collision {
+        //     had_collision = false;
+
+        //     body_aabb := get_world_aabb(a);
+
+        //     potential_collisions.count = 0;
+        //     query(tree_bodies, body_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
+        //         if p.type == .Static {
+        //             array_add(potential_collisions, p);
+        //         }
+
+        //         return true;
+        //     }, *potential_collisions);
+
+        //     largest_resolve: Vector3;
+        //     largest_is_triangle: bool;
+        //     largest_triangle: Triangle3;
+        //     largest_is_ground: bool;
+        //     for b: potential_collisions {
+        //         for index_b: 0..b.shapes.count - 1 {
+        //             shape_b := b.shapes[index_b];
+
+        //             // TODO dont need this until we support static convex hulls
+        //             // if !valid_body(body_history, b, index_b) {
+        //             //     continue;
+        //             // }
+
+        //             for index_a: 0..a.shapes.count - 1 {
+        //                 shape_a := a.shapes[index_a];
+
+        //                 if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
+        //                     resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+        //                     if length_squared(resolve) > 0 {
+        //                         should_replace := false;
+        //                         should_replace = should_replace || (ground && !largest_is_ground);
+        //                         should_replace = should_replace || (ground && largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
+        //                         should_replace = should_replace || (!ground && !largest_is_ground && length_squared(resolve) > length_squared(largest_resolve));
+        //                         if should_replace {
+        //                             largest_resolve = resolve;
+        //                             largest_is_triangle = true;
+        //                             largest_triangle = triangle;
+        //                             largest_is_ground = ground;
+        //                         }
+        //                     }
+        //                 } else {
+        //                     print("Unhandled collision combination. % %\n", shape_a.type, shape_b.type);
+        //                     assert(false, "Unhandled collision combination.");
+        //                 }
+        //             }
+        //         }
+        //     }
+
+        //     if length_squared(largest_resolve) > 0 {
+        //         a.position = a.position + largest_resolve;
+        //         resolve_normal := normalize(largest_resolve);
+        //         if dot(a.velocity, resolve_normal) < 0 {
+        //             a.velocity = project_direction(resolve_normal, a.velocity);
+        //         }
+        //         triangle_normal := normalize(cross(largest_triangle.b - largest_triangle.a, largest_triangle.c - largest_triangle.a));
+        //         if largest_is_triangle {
+        //             array_add(*triangle_history, largest_triangle);
+        //         }
+        //         had_collision = true;
+        //     }
+        // }
     }
 }
 
@@ -353,59 +509,59 @@ valid_triangle :: (history: [..] Triangle3, triangle: Triangle3) -> bool {
     return true;
 }
 
-get_restricted_vector :: (resolve: Vector3, normals: [..] Vector3) -> Vector3, Vector3 {
-    // before you do this I think you have to solve all stair step collisions
-    // then from this new position get all collisions
-    // you can add together all resolution vectors of all collisions to get the new displacement direction
+// get_restricted_vector :: (resolve: Vector3, normals: [..] Vector3) -> Vector3, Vector3 {
+//     // before you do this I think you have to solve all stair step collisions
+//     // then from this new position get all collisions
+//     // you can add together all resolution vectors of all collisions to get the new displacement direction
 
-    // basically set up each normal as a plane with the origin at 0,0,0
-    // take the resolve vector as a plane set up at 0,0,0
-    // move the resolve plane forward by the resolve vector distance
-    // project the new resolve position onto the nearest feature of the new plane collisions
-    // this would work, but I think there's a better way
+//     // basically set up each normal as a plane with the origin at 0,0,0
+//     // take the resolve vector as a plane set up at 0,0,0
+//     // move the resolve plane forward by the resolve vector distance
+//     // project the new resolve position onto the nearest feature of the new plane collisions
+//     // this would work, but I think there's a better way
 
-    // only consider planes whos normals are against the resolve vector
-    // build out the list of all planes in some winding order around resolve vector
-    // each adjacent plane should make a line intersection with each other
-    // sort these into the list
-    // project the resolve vector onto each of these restrictions
+//     // only consider planes whos normals are against the resolve vector
+//     // build out the list of all planes in some winding order around resolve vector
+//     // each adjacent plane should make a line intersection with each other
+//     // sort these into the list
+//     // project the resolve vector onto each of these restrictions
 
-    RestrictionType :: enum {
-        Plane;
-        Line;
-    }
+//     RestrictionType :: enum {
+//         Plane;
+//         Line;
+//     }
 
-    Restriction :: struct {
-        type: RestrictionType;
-        direction: Vector3;
-        union {
+//     Restriction :: struct {
+//         type: RestrictionType;
+//         direction: Vector3;
+//         union {
 
-        } 
-    }
+//         } 
+//     }
 
-    restrictions: [..] Restriction;
+//     restrictions: [..] Restriction;
 
-    // this is extremely hard to figure out analytically like this
-    // so I think I just need to construct the simplex that contains the resolve vector using the intersection of the planes
-    // then find the nearest feature to the resolve vector, whether it's a line or a plane (or a point?)
-    // I think ray directions are only allowed to go in the normal direction of the planes that are intersecting
+//     // this is extremely hard to figure out analytically like this
+//     // so I think I just need to construct the simplex that contains the resolve vector using the intersection of the planes
+//     // then find the nearest feature to the resolve vector, whether it's a line or a plane (or a point?)
+//     // I think ray directions are only allowed to go in the normal direction of the planes that are intersecting
 
-    // you have your new resolve vector
-    // get all the normals that are against the resolve vector
-    // get the intersection shape of all those planes
-    // get the dot product between your resolve vector and the resulting shape
+//     // you have your new resolve vector
+//     // get all the normals that are against the resolve vector
+//     // get the intersection shape of all those planes
+//     // get the dot product between your resolve vector and the resulting shape
 
-    // we keep track of currently restricted normals
-    // we only consider new normals that are going against our velocity
-    // if we find a new velocity, if that velocity is going against every previously restricted normal we stop
+//     // we keep track of currently restricted normals
+//     // we only consider new normals that are going against our velocity
+//     // if we find a new velocity, if that velocity is going against every previously restricted normal we stop
 
-    // we shouldn't possibly have to iterate more than n^2 times
+//     // we shouldn't possibly have to iterate more than n^2 times
 
-    for limit: 0..normals.count - 1 {
-        for i: 0..normals.count - 1 {
+//     for limit: 0..normals.count - 1 {
+//         for i: 0..normals.count - 1 {
 
-        }
-    }
-}
+//         }
+//     }
+// }
 
 #scope_export
