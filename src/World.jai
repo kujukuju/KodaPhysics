@@ -70,6 +70,7 @@ step_physics :: (dt: float) {
 
             largest_step: float;
             largest_triangle: Triangle3;
+            largest_normal: Vector3;
             for b: potential_collisions {
                 for index_b: 0..b.shapes.count - 1 {
                     shape_b := b.shapes[index_b];
@@ -78,12 +79,13 @@ step_physics :: (dt: float) {
                         shape_a := a.shapes[index_a];
 
                         if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
-                            resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+                            resolve, triangle, normal, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
                             if ground {
                                 resolve_length := length(resolve);
                                 if resolve_length > largest_step {
                                     largest_step = resolve_length;
                                     largest_triangle = triangle;
+                                    largest_normal = normal;
                                 }
                             }
                         } else {
@@ -94,9 +96,8 @@ step_physics :: (dt: float) {
             }
 
             if largest_step > 0 {
-                triangle_normal := normalize(cross(largest_triangle.b - largest_triangle.a, largest_triangle.c - largest_triangle.a));
                 penetration := array_add(*penetrations);
-                penetration.normal = triangle_normal;
+                penetration.normal = largest_normal;
                 penetration.d = 0.0;
 
                 a.position += largest_step * Vector3.{0, 1, 0};
@@ -125,8 +126,8 @@ step_physics :: (dt: float) {
                     shape_a := a.shapes[index_a];
 
                     if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
-                        resolve, triangle, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
-                        if length_squared(resolve) > 0 {
+                        resolve, triangle, normal, ground := resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, triangle_history);
+                        if !ground && length_squared(resolve) > 0 {
                             penetration := array_add(*penetrations);
                             penetration.normal = normalize(resolve);
                             penetration.d = dot(resolve, penetration.normal);
@@ -146,28 +147,30 @@ step_physics :: (dt: float) {
         // vx * p1x + vy * p1y + vz * p1z = d1
         // vx * p2x + vy * p2y + vz * p2z = d2
 
-        pen_count := max(penetrations.count, 3);
+        if penetrations.count > 0 {
+            print("penetrations %\n", penetrations);
 
-        print("penetrations %\n", penetrations);
+            matrix: [..] [3] float;
+            array_resize(*matrix, penetrations.count);
+            rhs: [..] float;
+            array_resize(*rhs, penetrations.count);
+            for i: 0..penetrations.count - 1 {
+                penetration := penetrations[i];
+                matrix[i][0] = penetration.normal.x;
+                matrix[i][1] = penetration.normal.y;
+                matrix[i][2] = penetration.normal.z;
+                rhs[i] = penetration.d;
+            }
 
-        matrix: Matrix;
-        resize(*matrix, pen_count, pen_count);
-        rhs: [..] float;
-        array_resize(*rhs, pen_count);
-        for i: 0..penetrations.count - 1 {
-            penetration := penetrations[i];
-            matrix[index(matrix, i, 0)] = penetration.normal.x;
-            matrix[index(matrix, i, 1)] = penetration.normal.y;
-            matrix[index(matrix, i, 2)] = penetration.normal.z;
-            rhs[i] = penetration.d;
+            resolution := solve_least_squares_svd(matrix, rhs);
+
+            // resolution := solve_gauss_seidel(matrix, rhs);
+            print("result %\n", resolution);
+            
+            a.position.x += resolution[0];
+            a.position.y += resolution[1];
+            a.position.z += resolution[2];
         }
-
-        resolution := solve_gaussian_elim(matrix, rhs);
-        print("result %\n", resolution);
-        
-        a.position.x += resolution[0];
-        a.position.y += resolution[1];
-        a.position.z += resolution[2];
 
         // largest_step: float;
         // largest_triangle: Triangle3;
@@ -290,7 +293,7 @@ set_gravity :: (g: Vector3) {
 
 #scope_module
 
-resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, triangle_history: [..] Triangle3) -> Vector3, Triangle3, bool {
+resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, triangle_history: [..] Triangle3) -> Vector3, Triangle3, Vector3, bool {
     body_aabb := get_world_aabb(a);
     body_vertices := get_world_vertices(a, a_shape);
 
@@ -306,6 +309,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     resolve_vector: Vector3;
     resolve_depth_squared: float;
     resolve_ground: bool;
+    resolve_normal: Vector3;
     found_triangle: bool;
 
     QueryInfo :: struct {
@@ -315,6 +319,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
         resolve_vector: *Vector3;
         resolve_depth_squared: *float;
         resolve_ground: *bool;
+        resolve_normal: *Vector3;
         found_triangle: *bool;
         body_vertices: *KodaVertices;
         step_height: float;
@@ -328,6 +333,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     info.resolve_vector = *resolve_vector;
     info.resolve_depth_squared = *resolve_depth_squared;
     info.resolve_ground = *resolve_ground;
+    info.resolve_normal = *resolve_normal;
     info.found_triangle = *found_triangle;
     info.body_vertices = *body_vertices;
     info.step_height = a.step_height;
@@ -366,6 +372,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
                                 << info.resolve_vector = resolve_vector;
                                 << info.resolve_depth_squared = length_squared(resolve_vector);
                                 << info.resolve_ground = true;
+                                << info.resolve_normal = triangle_normal;
                                 << info.found_triangle = true;
                             }
                         } else {
@@ -376,6 +383,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
                             << info.resolve_vector = resolve_vector;
                             << info.resolve_depth_squared = length_squared(resolve_vector);
                             << info.resolve_ground = true;
+                            << info.resolve_normal = triangle_normal;
                             << info.found_triangle = true;
                         }
                     } else if !(<< info.resolve_ground) {
@@ -389,6 +397,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
                             // << info.triangle_d = 0.0;
                             << info.resolve_vector = resolve_vector;
                             << info.resolve_depth_squared = resolve_depth_squared;
+                            << info.resolve_normal = normalize(resolve_vector);
                             << info.found_triangle = true;
                         }
                     }
@@ -402,6 +411,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
                         // << info.triangle_d = 0.0;
                         << info.resolve_vector = resolve_vector;
                         << info.resolve_depth_squared = resolve_depth_squared;
+                        << info.resolve_normal = normalize(resolve_vector);
                         << info.found_triangle = true;
                     }
                 }
@@ -431,6 +441,7 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
                     // << info.triangle_d = 0.0;
                     << info.resolve_vector = resolve_vector;
                     << info.resolve_depth_squared = resolve_depth_squared;
+                    << info.resolve_normal = normalize(resolve_vector);
                     << info.found_triangle = true;
                 }
             }
@@ -440,10 +451,10 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     }
 
     if !found_triangle {
-        return .{}, .{}, false;
+        return .{}, .{}, .{}, false;
     }
 
-    return resolve_vector, triangle, resolve_ground;
+    return resolve_vector, triangle, resolve_normal, resolve_ground;
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
