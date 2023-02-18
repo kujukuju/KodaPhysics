@@ -1,3 +1,16 @@
+
+/*
+ when you end up with a system of equations like
+ x = 3
+ y + 2z = 4
+ then the answer is x is 3
+ y, z = unit(1, 2) * 4 * 1, unit(1, 2) * 4 * 2
+
+ if you have 0 = z, then z can be anything, so just set z to 0
+
+ if you have x0 y0 z0 = something non 0, you have no solution
+ */
+
 Matrix :: struct {
     values: [..] float;
     width: int;
@@ -28,472 +41,575 @@ vector_inner_product :: (a: [..] float, b: [..] float) -> float {
     return ab;
 }
 
-// singular value decomposition
-calculate_svd :: (a: *[] [$n] float) -> v: [n][n] float, w: [n] float {
-    copysign :: (mag: float, sign: float) -> float {
-        if sign > 0 {
-            return abs(mag);
-        } else if sign < 0 {
-            return -abs(mag);
-        }
-
-        return mag;
-    }
-
-    hypot :: (a: float, b: float) -> float {
-        return sqrt(a * a + b * b);
-    }
-
-    SVD_NMAX :: 40;
+solve_minimal_gaussian_elimination :: (m: [..] [$n] float, b: [..] float) -> [n] float {
     EPSILON :: 0.000001;
 
-    m := a.count;
-
-    // u := a;
-    w: [n] float;
-    v: [n][n] float;
-
-    rv1: *float;
-    i := -1;
-    j := -1;
-    k := -1;
-    l := -1;
-    tst1: float;
-    c: float;
-    f: float;
-    g: float;
-    h: float;
-    s: float;
-    scale: float;
-    
-    assert(m > 0 && n > 0);
-
-    rv1 = alloc(n * size_of(float));
-    defer free(rv1);
-
-    /*
-     * householder reduction to bidiagonal form 
-     */
-    g = 0.0;
-    scale = 0.0;
-    tst1 = 0.0;
-    for i: 0..n - 1 {
-        l = i + 1;
-        rv1[i] = scale * g;
-        g = 0.0;
-        s = 0.0;
-        scale = 0.0;
-        if i < m {
-            for k: i..m - 1 {
-                scale += abs(a.data[k][i]);
-            }
-            if scale != 0.0 {
-                for k: i..m - 1 {
-                    a.data[k][i] /= scale;
-                    s += a.data[k][i] * a.data[k][i];
-                }
-                f = a.data[i][i];
-                g = -copysign(sqrt(s), f);
-                h = f * g - s;
-                a.data[i][i] = f - g;
-                if i < n - 1 {        /* no test in NR */
-                    for j: l..n - 1 {
-                        s = 0.0;
-                        for k: i..m - 1 {
-                            s += a.data[k][i] * a.data[k][j];
-                        }
-                        f = s / h;
-                        for k: i..m - 1 {
-                            a.data[k][j] += f * a.data[k][i];
-                        }
-                    }
-                }
-                for k: i..m - 1 {
-                    a.data[k][i] *= scale;
-                }
-            }
+    a: [..] [n + 1] float;
+    array_resize(*a, m.count);
+    for row: 0..m.count - 1 {
+        for column: 0..n - 1 {
+            a[row][column] = m[row][column];
         }
-        w[i] = scale * g;
-        g = 0.0;
-        s = 0.0;
-        scale = 0.0;
-        if i < m && i < n - 1 {
-            for k: l..n - 1 {
-                scale += abs(a.data[i][k]);
-            }
-            if scale != 0.0 {
-                for k: l..n - 1 {
-                    a.data[i][k] /= scale;
-                    s += a.data[i][k] * a.data[i][k];
-                }
-                f = a.data[i][l];
-                g = -copysign(sqrt(s), f);
-                h = f * g - s;
-                a.data[i][l] = f - g;
-                for k: l..n - 1 {
-                    rv1[k] = a.data[i][k] / h;
-                }
-                for j: l..m - 1 {
-                    s = 0.0;
-                    for k: l..n - 1 {
-                        s += a.data[j][k] * a.data[i][k];
-                    }
-                    for k: l..n - 1 {
-                        a.data[j][k] += s * rv1[k];
-                    }
-                }
-                for k: l..n - 1 {
-                    a.data[i][k] *= scale;
-                }
-            }
-        }
-        {
-            tmp := abs(w[i]) + abs(rv1[i]);
-            tst1 = ifx tst1 > tmp then tst1 else tmp;
-        }
+
+        a[row][n] = b[row];
     }
 
-    /*
-     * accumulation of right-hand transformations 
-     */
-    // TODO I think itd be faster, especially for something with so few entries like this, to use an actual for loop
-    i = n - 1;
-    while i >= 0 {
-        defer i -= 1;
+    // forward propagation gaussian elimination
+    row := 0;
+    column := 0;
+    last_valid_row := 0;
+    last_valid_column := 0;
+    while row < a.count - 1 && column < n {
+        largest_row := row;
+        largest_value := abs(a[row][column]);
 
-        if i < n - 1 {        /* no test in NR */
-            if g != 0.0 {
-                for j: l..n - 1 {
-                    /*
-                     * double division avoids possible underflow 
-                     */
-                    v[j][i] = (a.data[i][j] / a.data[i][l]) / g;
-                }
-                for j: l..n - 1 {
-                    s = 0.0;
-                    for k: l..n - 1 {
-                        s += a.data[i][k] * v[k][j];
-                    }
-                    for k: l..n - 1 {
-                        v[k][j] += s * v[k][i];
-                    }
-                }
-            }
-            for j: l..n - 1 {
-                v[i][j] = 0.0;
-                v[j][i] = 0.0;
+        // find the largest row for this column partial rotation or whatever
+        for next_row: row + 1..a.count - 1 {
+            current_value := abs(a[next_row][column]);
+
+            if current_value > largest_value {
+                largest_row = next_row;
+                largest_value = current_value;
             }
         }
-        v[i][i] = 1.0;
-        g = rv1[i];
-        l = i;
+
+        // make this row the remaining one with the largest column value
+        if row != largest_row {
+            a[row], a[largest_row] = swap(a[row], a[largest_row]);
+        }
+
+        if largest_value < EPSILON {
+            a[row][column] = 0;
+            column += 1;
+            continue;
+        }
+
+        last_valid_row = row;
+        last_valid_column = column;
+
+        for next_row: row + 1..a.count - 1 {
+            // if the current column in the next row is basically 0 just set it to 0 and skip it
+            if abs(a[next_row][column]) < EPSILON {
+                a[next_row][column] = 0;
+                continue;
+            }
+
+            // we'll explicitly set the next_row column value here to avoid any precision errors since this is the critical function
+            normalize_mul := a[next_row][column] / a[row][column];
+            a[next_row][column] = 0;
+
+            // last column inclusive here
+            for next_column: column + 1..n {
+                cancelling_column_value := normalize_mul * a[row][next_column];
+
+                next_column_value := a[next_row][next_column];
+                next_column_value -= cancelling_column_value;
+                if abs(next_column_value) < EPSILON {
+                    next_column_value = 0;
+                }
+
+                a[next_row][next_column] = next_column_value;
+            }
+        }
+
+        row += 1;
+        column += 1;
     }
 
-    /*
-     * accumulation of left-hand transformations 
-     */
-    i = ifx m < n then m - 1 else n - 1;
-    while i >= 0 {
-        defer i -= 1;
-
-        l = i + 1;
-        g = w[i];
-        if i != n - 1 {
-            for j: l..n - 1 {
-                a.data[i][j] = 0.0;
-            }
-        }
-        if g != 0.0 {
-            for j: l..n - 1 {
-                s = 0.0;
-                for k: l..m - 1 {
-                    s += a.data[k][i] * a.data[k][j];
-                }
-                /*
-                 * double division avoids possible underflow
-                 */
-                f = (s / a.data[i][i]) / g;
-                for k: i..m - 1 {
-                    a.data[k][j] += f * a.data[k][i];
-                }
-            }
-            for j: i..m - 1 {
-                a.data[j][i] /= g;
-            }
+    if last_valid_row < a.count - 1 && last_valid_column < n - 1 {
+        potential_diagonal := a[last_valid_row + 1][last_valid_column + 1];
+        if abs(potential_diagonal) < EPSILON {
+            a[last_valid_row + 1][last_valid_column + 1] = 0;
         } else {
-            for j: i..m - 1 {
-                a.data[j][i] = 0.0;
-            }
+            last_valid_row += 1;
+            last_valid_column += 1;
         }
-        a.data[i][i] += 1.0;
     }
 
-    /*
-     * diagonalization of the bidiagonal form
-     */
-    k = n - 1;
-    while k >= 0 {
-        defer k -= 1;
+    print("Forward reduced matrix:\n");
+    for row: a {
+        print("%\n", row);
+    }
+    print("\n");
 
-        k1 := k - 1;
-        its := 0;
-
-        while true {
-            docancellation := true;
-            x: float;
-            y: float;
-            z: float;
-            l1 := -1;
-
-            its += 1;
-            if its > SVD_NMAX {
-                print("No convergence. %\n", << a);
-                assert(false, "No convergence.");
-            }
-
-            l := k;
-            while l >= 0 {  /* test for splitting */
-                defer l -= 1;
-
-                tst2 := abs(rv1[l]) + tst1;
-
-                if tst2 == tst1 {
-                    docancellation = false;
-                    break;
-                }
-                l1 = l - 1;
-                /*
-                 * rv1(1) is always zero, so there is no exit through the
-                 * bottom of the loop
-                 */
-                tst2 = abs(w[l - 1]) + tst1;
-                if tst2 == tst1 {
+    // at this point we've forward propagated, we want to check if there are any rows below here that are inherently no solutions
+    // every column in the row has to be 0 while the solution to the column isn't 0
+    no_solution := false;
+    for next_row: last_valid_row + 1..a.count - 1 {
+        if a[next_row][n] != 0 {
+            no_solution_row := true;
+            for columns: 0..n - 1 {
+                if a[next_row][column] != 0 {
+                    no_solution_row = false;
                     break;
                 }
             }
-            /*
-             * cancellation of rv1[l] if l > 1
-             */
-            if docancellation {
-                c = 0.0;
-                s = 1.0;
-                for i: l..k {
-                    f = s * rv1[i];
-                    rv1[i] = c * rv1[i];
-                    if abs(f) + tst1 == tst1 {
-                        break;
-                    }
-                    g = w[i];
-                    h = hypot(f, g);
-                    w[i] = h;
-                    c = g / h;
-                    s = -f / h;
-                    for j: 0..m - 1 {
-                        y := a.data[j][l1];
-                        z := a.data[j][i];
 
-                        a.data[j][l1] = y * c + z * s;
-                        a.data[j][i] = z * c - y * s;
-                    }
-                }
-            }
-            
-            /*
-             * test for convergence
-             */
-            z = w[k];
-            if l != k {
-                i1: int;
-
-                /*
-                 * shift from bottom 2 by 2 minor
-                 */
-                x = w[l];
-                y = w[k1];
-                g = rv1[k1];
-                h = rv1[k];
-                f = 0.5 * (((g + z) / h) * ((g - z) / y) + y / h - h / y);
-                g = hypot(f, 1.0);
-                f = x - (z / x) * z + (h / x) * (y / (f + copysign(g, f)) - h);
-                /*
-                 * next qr transformation 
-                 */
-                c = 1.0;
-                s = 1.0;
-                for i1: l..k - 1 {
-                    i = i1 + 1;
-                    g = rv1[i];
-                    y = w[i];
-                    h = s * g;
-                    g = c * g;
-                    z = hypot(f, h);
-                    rv1[i1] = z;
-                    c = f / z;
-                    s = h / z;
-                    f = x * c + g * s;
-                    g = g * c - x * s;
-                    h = y * s;
-                    y *= c;
-                    for j: 0..n - 1 {
-                        x = v[j][i1];
-                        z = v[j][i];
-                        v[j][i1] = x * c + z * s;
-                        v[j][i] = z * c - x * s;
-                    }
-                    z = hypot(f, h);
-                    w[i1] = z;
-                    /*
-                     * rotation can be arbitrary if z = 0
-                     */
-                    if z != 0.0 {
-                        c = f / z;
-                        s = h / z;
-                    }
-                    f = c * g + s * y;
-                    x = c * y - s * g;
-                    for j: 0..m - 1 {
-                        y = a.data[j][i1];
-                        z = a.data[j][i];
-                        a.data[j][i1] = y * c + z * s;
-                        a.data[j][i] = z * c - y * s;
-                    }
-                }
-                rv1[l] = 0.0;
-                rv1[k] = f;
-                w[k] = x;
-            } else {
-                /*
-                 * w[k] is made non-negative
-                 */
-                if z < 0.0 {
-                    w[k] = -z;
-                    for j: 0..n - 1 {
-                        v[j][k] = -v[j][k];
-                    }
-                }
+            if no_solution_row {
+                no_solution = true;
                 break;
             }
         }
     }
 
-    return v, w;
+    if no_solution {
+        print("No solution.\n");
+        // solve using least squares to minimize ax-b
+    }
+
+    // at this point we have not yet found a no solution matrix so we continue with backwards propagation
+    row = last_valid_row;
+    column = last_valid_column;
+    while row >= 1 && column >= 1 {
+        // not checking epsilon here because the implication is if theres a value then it's part of the weird diagonal
+        // so if we were to find an epsilon, we'd have to also move back a row I guess and other weird stuff
+        if a[row][column] == 0 {
+            column -= 1;
+            continue;
+        }
+
+        previous_row := row - 1;
+        while previous_row >= 0 {
+            // if the current column in the next row is basically 0 just set it to 0 and skip it
+            if abs(a[previous_row][column]) < EPSILON {
+                a[previous_row][column] = 0;
+                previous_row -= 1;
+                continue;
+            }
+
+            // we'll explicitly set the next_row column value here to avoid any precision errors since this is the critical function
+            normalize_mul := a[previous_row][column] / a[row][column];
+            a[previous_row][column] = 0;
+
+            // last column inclusive here
+            previous_column := column - 1;
+            while previous_column >= 0 {
+                cancelling_column_value := normalize_mul * a[row][previous_column];
+
+                previous_column_value := a[previous_row][previous_column];
+                previous_column_value -= cancelling_column_value;
+                if abs(previous_column_value) < EPSILON {
+                    previous_column_value = 0;
+                }
+
+                a[previous_row][previous_column] = previous_column_value;
+
+                previous_column -= 1;
+            }
+
+            // explicitly cancel out the b vector since we're not going in that direction
+            cancelling_column_value := normalize_mul * a[row][n];
+
+            previous_column_value := a[previous_row][n];
+            previous_column_value -= cancelling_column_value;
+            if abs(previous_column_value) < EPSILON {
+                previous_column_value = 0;
+            }
+            a[previous_row][n] = previous_column_value;
+
+            previous_row -= 1;
+        }
+
+        row -= 1;
+        column -= 1;
+    }
+
+    // now the matrix has been reduced
+    print("Reduced matrix:\n");
+    for row: a {
+        print("%\n", row);
+    }
+    print("\n");
 }
 
-solve_least_squares_svd :: (a: [..] [$n] float, b: [..] float) -> [n] float {
-    index :: (row: int, column: int, columns: int) -> int {
-        return row * columns + column;
-    }
+// singular value decomposition
+// calculate_svd :: (a: [] [$n] float) -> u: [][n] float, v: [n][n] float, w: [n] float {
+//     u := NewArray(a.count, [n] float);
+//     v: [n][n] float;
+//     w: [n] float;
 
-    mul :: (m: [] float, v: [] float) -> [n] float {
-        columns := v.count;
-        rows :: n;
-        assert(m.count == rows * columns);
+//     mOrN 
 
-        result: [n] float;
-        for row: 0..rows - 1 {
-            for column: 0..columns - 1 {
-                result[row] += m[index(row, column, columns)] * v[column];
-            }
-        }
+//   const mOrN = (withu === 'f') ? m : n
 
-        return result;
-    }
+//   // Initialize u
+//   for (i = 0; i < m; i++) {
+//     u[i] = new Array(mOrN).fill(0)
+//   }
 
-    mul :: (a: [n][n] float, b: [n][n] float) -> [n][n] float {
-        result: [n][n] float;
-        for final_row: 0..n - 1 {
-            for final_column: 0..n - 1 {
-                for i: 0..n - 1 {
-                    result[final_row][final_column] += a[final_row][i] * b[i][final_column];
-                }
-            }
-        }
+//   // Initialize v
+//   for (i = 0; i < n; i++) {
+//     v[i] = new Array(n).fill(0)
+//   }
 
-        return result;
-    }
+//   // Initialize q
+//   const q = new Array(n).fill(0)
 
-    mul_transpose :: (a: [n][n] float, b: [][n] float, out: *[] float) {
-        // transpose b during the mul operation
-        rows :: n;
-        columns := b.count;
-        assert(out.count == rows * columns);
+//   // Copy array a in u
+//   for (i = 0; i < m; i++) {
+//     for (j = 0; j < n; j++) {
+//       u[i][j] = a[i][j]
+//     }
+//   }
 
-        for final_row: 0..rows - 1 {
-            for final_column: 0..columns - 1 {
-                for i: 0..n - 1 {
-                    out.data[index(final_row, final_column, columns)] += a[final_row][i] * b[final_column][i];
-                }
-            }
-        }
-    }
+//   for (i = 0; i < n; i++) {
+//     e[i] = g
+//     s = 0
+//     l = i + 1
+//     for (j = i; j < m; j++) {
+//       s += Math.pow(u[j][i], 2)
+//     }
+//     if (s < tol) {
+//       g = 0
+//     } else {
+//       f = u[i][i]
+//       g = f < 0 ? Math.sqrt(s) : -Math.sqrt(s)
+//       h = f * g - s
+//       u[i][i] = f - g
+//       for (j = l; j < n; j++) {
+//         s = 0
+//         for (k = i; k < m; k++) {
+//           s += u[k][i] * u[k][j]
+//         }
+//         f = s / h
+//         for (k = i; k < m; k++) {
+//           u[k][j] = u[k][j] + f * u[k][i]
+//         }
+//       }
+//     }
+//     q[i] = g
+//     s = 0
+//     for (j = l; j < n; j++) {
+//       s += Math.pow(u[i][j], 2)
+//     }
+//     if (s < tol) {
+//       g = 0
+//     } else {
+//       f = u[i][i + 1]
+//       g = f < 0 ? Math.sqrt(s) : -Math.sqrt(s)
+//       h = f * g - s
+//       u[i][i + 1] = f - g
+//       for (j = l; j < n; j++) {
+//         e[j] = u[i][j] / h
+//       }
+//       for (j = l; j < m; j++) {
+//         s = 0
+//         for (k = l; k < n; k++) {
+//           s += u[j][k] * u[i][k]
+//         }
+//         for (k = l; k < n; k++) {
+//           u[j][k] = u[j][k] + s * e[k]
+//         }
+//       }
+//     }
+//     y = Math.abs(q[i]) + Math.abs(e[i])
+//     if (y > x) {
+//       x = y
+//     }
+//   }
 
-    mul :: (a: [][n] float, b: [n] float, out: *[] float) {
-        rows := a.count;
-        columns :: n;
-        assert(out.count == rows);
+//   // Accumulation of right-hand transformations
+//   if (withv) {
+//     for (i = n - 1; i >= 0; i--) {
+//       if (g !== 0) {
+//         h = u[i][i + 1] * g
+//         for (j = l; j < n; j++) {
+//           v[j][i] = u[i][j] / h
+//         }
+//         for (j = l; j < n; j++) {
+//           s = 0
+//           for (k = l; k < n; k++) {
+//             s += u[i][k] * v[k][j]
+//           }
+//           for (k = l; k < n; k++) {
+//             v[k][j] = v[k][j] + s * v[k][i]
+//           }
+//         }
+//       }
+//       for (j = l; j < n; j++) {
+//         v[i][j] = 0
+//         v[j][i] = 0
+//       }
+//       v[i][i] = 1
+//       g = e[i]
+//       l = i
+//     }
+//   }
 
-        for row: 0..rows - 1 {
-            for column: 0..columns - 1 {
-                out.data[row] += a[row][column] * b[column];
-            }
-        }
-    }
+//   // Accumulation of left-hand transformations
+//   if (withu) {
+//     if (withu === 'f') {
+//       for (i = n; i < m; i++) {
+//         for (j = n; j < m; j++) {
+//           u[i][j] = 0
+//         }
+//         u[i][i] = 1
+//       }
+//     }
+//     for (i = n - 1; i >= 0; i--) {
+//       l = i + 1
+//       g = q[i]
+//       for (j = l; j < mOrN; j++) {
+//         u[i][j] = 0
+//       }
+//       if (g !== 0) {
+//         h = u[i][i] * g
+//         for (j = l; j < mOrN; j++) {
+//           s = 0
+//           for (k = l; k < m; k++) {
+//             s += u[k][i] * u[k][j]
+//           }
+//           f = s / h
+//           for (k = i; k < m; k++) {
+//             u[k][j] = u[k][j] + f * u[k][i]
+//           }
+//         }
+//         for (j = i; j < m; j++) {
+//           u[j][i] = u[j][i] / g
+//         }
+//       } else {
+//         for (j = i; j < m; j++) {
+//           u[j][i] = 0
+//         }
+//       }
+//       u[i][i] = u[i][i] + 1
+//     }
+//   }
 
-    sub_norm :: (a: [] float, b: [] float) -> float {
-        // subtract a - b then calculate the euclidian norm of the result
-        result := 0.0;
-        for i: 0..a.count - 1 {
-            subbed := a[i] - b[i];
-            result += subbed * subbed;
-        }
-        return sqrt(result);
-    }
+//   // Diagonalization of the bidiagonal form
+//   eps = eps * x
+//   let testConvergence
+//   for (k = n - 1; k >= 0; k--) {
+//     for (let iteration = 0; iteration < 50; iteration++) {
+//       // test-f-splitting
+//       testConvergence = false
+//       for (l = k; l >= 0; l--) {
+//         if (Math.abs(e[l]) <= eps) {
+//           testConvergence = true
+//           break
+//         }
+//         if (Math.abs(q[l - 1]) <= eps) {
+//           break
+//         }
+//       }
 
-    MAX_ITER :: 1000;
-    // MAX_ITER :: 40;
-    EPSILON :: 0.000001;
+//       if (!testConvergence) { // cancellation of e[l] if l>0
+//         c = 0
+//         s = 1
+//         l1 = l - 1
+//         for (i = l; i < k + 1; i++) {
+//           f = s * e[i]
+//           e[i] = c * e[i]
+//           if (Math.abs(f) <= eps) {
+//             break // goto test-f-convergence
+//           }
+//           g = q[i]
+//           q[i] = Math.sqrt(f * f + g * g)
+//           h = q[i]
+//           c = g / h
+//           s = -f / h
+//           if (withu) {
+//             for (j = 0; j < m; j++) {
+//               y = u[j][l1]
+//               z = u[j][i]
+//               u[j][l1] = y * c + (z * s)
+//               u[j][i] = -y * s + (z * c)
+//             }
+//           }
+//         }
+//       }
 
-    m := a.count;
+//       // test f convergence
+//       z = q[k]
+//       if (l === k) { // convergence
+//         if (z < 0) {
+//           // q[k] is made non-negative
+//           q[k] = -z
+//           if (withv) {
+//             for (j = 0; j < n; j++) {
+//               v[j][k] = -v[j][k]
+//             }
+//           }
+//         }
+//         break // break out of iteration loop and move on to next k value
+//       }
 
-    u := array_copy(a);
-    defer array_free(u);
-    v, w := calculate_svd(*u);
+//       // Shift from bottom 2x2 minor
+//       x = q[l]
+//       y = q[k - 1]
+//       g = e[k - 1]
+//       h = e[k]
+//       f = ((y - z) * (y + z) + (g - h) * (g + h)) / (2 * h * y)
+//       g = Math.sqrt(f * f + 1)
+//       f = ((x - z) * (x + z) + h * (y / (f < 0 ? (f - g) : (f + g)) - h)) / x
 
-    x: [n] float;
-    x_prev: [n] float;
-    error := 0.0;
-    error_prev := 0.0;
+//       // Next QR transformation
+//       c = 1
+//       s = 1
+//       for (i = l + 1; i < k + 1; i++) {
+//         g = e[i]
+//         y = q[i]
+//         h = s * g
+//         g = c * g
+//         z = Math.sqrt(f * f + h * h)
+//         e[i - 1] = z
+//         c = f / z
+//         s = h / z
+//         f = x * c + g * s
+//         g = -x * s + g * c
+//         h = y * s
+//         y = y * c
+//         if (withv) {
+//           for (j = 0; j < n; j++) {
+//             x = v[j][i - 1]
+//             z = v[j][i]
+//             v[j][i - 1] = x * c + z * s
+//             v[j][i] = -x * s + z * c
+//           }
+//         }
+//         z = Math.sqrt(f * f + h * h)
+//         q[i - 1] = z
+//         c = f / z
+//         s = h / z
+//         f = c * g + s * y
+//         x = -s * g + c * y
+//         if (withu) {
+//           for (j = 0; j < m; j++) {
+//             y = u[j][i - 1]
+//             z = u[j][i]
+//             u[j][i - 1] = y * c + z * s
+//             u[j][i] = -y * s + z * c
+//           }
+//         }
+//       }
+//       e[l] = 0
+//       e[k] = f
+//       q[k] = x
+//     }
+//   }
 
-    // this is n by m
-    final: [..] float;
-    defer array_free(final);
-    array_resize(*final, m * n);
+//   // Number below eps should be zero
+//   for (i = 0; i < n; i++) {
+//     if (q[i] < eps) q[i] = 0
+//   }
 
-    b_temp: [..] float;
-    defer array_free(b_temp);
-    array_resize(*b_temp, b.count);
+//   return { u, q, v }
+// }
 
-    for i: 0..MAX_ITER - 1 {
-        diagonal: [n][n] float;
-        for di: 0..n - 1 {
-            diagonal[di][di] = w[di] / (w[di] * w[di] + error);
-        }
-        diagonal = mul(v, diagonal);
-        mul_transpose(diagonal, u, *final);
-        x_prev = x;
-        x = mul(final, b);
-        error_prev = error;
-        mul(a, x, *b_temp);
-        error = sub_norm(b_temp, b);
+// solve_least_squares_svd :: (a: [..] [$n] float, b: [..] float) -> [n] float {
+//     index :: (row: int, column: int, columns: int) -> int {
+//         return row * columns + column;
+//     }
 
-        delta_error := abs(error - error_prev);
-        if delta_error < EPSILON {
-            break;
-        }
-    }
+//     mul :: (m: [] float, v: [] float) -> [n] float {
+//         columns := v.count;
+//         rows :: n;
+//         assert(m.count == rows * columns);
 
-    return x;
-}
+//         result: [n] float;
+//         for row: 0..rows - 1 {
+//             for column: 0..columns - 1 {
+//                 result[row] += m[index(row, column, columns)] * v[column];
+//             }
+//         }
+
+//         return result;
+//     }
+
+//     mul :: (a: [n][n] float, b: [n][n] float) -> [n][n] float {
+//         result: [n][n] float;
+//         for final_row: 0..n - 1 {
+//             for final_column: 0..n - 1 {
+//                 for i: 0..n - 1 {
+//                     result[final_row][final_column] += a[final_row][i] * b[i][final_column];
+//                 }
+//             }
+//         }
+
+//         return result;
+//     }
+
+//     mul_transpose :: (a: [n][n] float, b: [][n] float, out: *[] float) {
+//         // transpose b during the mul operation
+//         rows :: n;
+//         columns := b.count;
+//         assert(out.count == rows * columns);
+
+//         for final_row: 0..rows - 1 {
+//             for final_column: 0..columns - 1 {
+//                 for i: 0..n - 1 {
+//                     out.data[index(final_row, final_column, columns)] += a[final_row][i] * b[final_column][i];
+//                 }
+//             }
+//         }
+//     }
+
+//     mul :: (a: [][n] float, b: [n] float, out: *[] float) {
+//         rows := a.count;
+//         columns :: n;
+//         assert(out.count == rows);
+
+//         for row: 0..rows - 1 {
+//             for column: 0..columns - 1 {
+//                 out.data[row] += a[row][column] * b[column];
+//             }
+//         }
+//     }
+
+//     sub_norm :: (a: [] float, b: [] float) -> float {
+//         // subtract a - b then calculate the euclidian norm of the result
+//         result := 0.0;
+//         for i: 0..a.count - 1 {
+//             subbed := a[i] - b[i];
+//             result += subbed * subbed;
+//         }
+//         return sqrt(result);
+//     }
+
+//     MAX_ITER :: 1000;
+//     // MAX_ITER :: 40;
+//     EPSILON :: 0.000001;
+
+//     m := a.count;
+
+//     u, v, w := calculate_svd(a);
+//     defer array_free(u);
+
+//     x: [n] float;
+//     x_prev: [n] float;
+//     error := 0.0;
+//     error_prev := 0.0;
+
+//     // this is n by m
+//     final: [..] float;
+//     defer array_free(final);
+//     array_resize(*final, m * n);
+
+//     b_temp: [..] float;
+//     defer array_free(b_temp);
+//     array_resize(*b_temp, b.count);
+
+//     for i: 0..MAX_ITER - 1 {
+//         diagonal: [n][n] float;
+//         for di: 0..n - 1 {
+//             diagonal[di][di] = w[di] / (w[di] * w[di] + error);
+//         }
+//         diagonal = mul(v, diagonal);
+//         mul_transpose(diagonal, u, *final);
+//         x_prev = x;
+//         x = mul(final, b);
+//         error_prev = error;
+//         mul(a, x, *b_temp);
+//         error = sub_norm(b_temp, b);
+
+//         delta_error := abs(error - error_prev);
+//         if delta_error < EPSILON {
+//             break;
+//         }
+//     }
+
+//     return x;
+// }
 
 // solve_gauss_seidel :: (matrix: [..] [$M] float, b: [..] float) -> [M] float {
 //     MAX_ITERATIONS :: 100;
