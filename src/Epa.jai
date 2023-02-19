@@ -1,5 +1,5 @@
 
-solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> Vector3 {
+solve_epa :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3 {
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;
@@ -38,7 +38,7 @@ solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> V
         }
 
         search_dir := faces[closest_face][3];
-        p := get_support(b, search_dir) - get_support(a, -search_dir);
+        p := get_support(v2, search_dir) - get_support(v1, -search_dir);
 
         if dot(p, search_dir) - min_dist < TOLERANCE {
             return -faces[closest_face][3] * dot(p, search_dir);
@@ -111,24 +111,24 @@ solve_epa :: (a: KodaVertices($N1), b: KodaVertices($N2), simplex: Simplex) -> V
 
 #scope_file
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
-    if vertices.count == 0 {
-        return .{};
-    }
+// get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+//     if vertices.count == 0 {
+//         return .{};
+//     }
 
-    largest_dot := dot(vertices[0], direction);
-    largest_vertex := vertices[0];
-    for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
+//     largest_dot := dot(vertices[0], direction);
+//     largest_vertex := vertices[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices[i];
 
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
+//         current_dot := dot(vertex, direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
 
-    return largest_vertex;
-}
+//     return largest_vertex;
+// }
 
 #scope_export

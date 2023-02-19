@@ -10,14 +10,15 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
-solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}) -> bool, Simplex {
+// solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}) -> bool, Simplex {
+solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> bool, Simplex {
     MAX_ITERATIONS :: 32;
 
     simplex: Simplex;
     simplex.count = 1;
 
     direction := v1[0] - v2[0];
-    simplex.a = get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1);
+    simplex.a = get_support(v2, direction, transform2) - get_support(v1, -direction, transform1);
     direction = -simplex.a;
 
     #if GJK_DEBUG {
@@ -39,7 +40,7 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
 
     for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DEBUG {
-            if step_debug(simplex, v1, v2, get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1)) {
+            if step_debug(simplex, v1, v2, get_support(v2, direction, transform2) - get_support(v1, -direction, transform1)) {
                 return false;
             }
         }
@@ -49,7 +50,7 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
         simplex.b = simplex.a;
         simplex.count += 1;
 
-        simplex.a = get_support(v2, direction, velocity2) - get_support(v1, -direction, velocity1);
+        simplex.a = get_support(v2, direction, transform2) - get_support(v1, -direction, transform1);
 
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}) {
@@ -90,6 +91,72 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 =
 
     return false, simplex;
 }
+
+get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+    largest_dot := dot(vertices[0], direction);
+    largest_vertex := vertices[0];
+    for i: 1..vertices.count - 1 {
+        vertex := vertices[i];
+
+        current_dot := dot(vertex, direction);
+        if current_dot > largest_dot {
+            largest_dot = current_dot;
+            largest_vertex = vertex;
+        }
+    }
+
+    return largest_vertex;
+}
+
+get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
+    largest_dot := dot(vertices[0], direction);
+    largest_vertex := vertices[0];
+    for i: 1..vertices.count - 1 {
+        vertex := vertices[i];
+
+        current_dot := dot(vertex, direction);
+        if current_dot > largest_dot {
+            largest_dot = current_dot;
+            largest_vertex = vertex;
+        }
+    }
+
+    if dot(velocity, velocity) > 0 {
+        for i: 0..vertices.count - 1 {
+            vertex := vertices[i] + velocity;
+
+            current_dot := dot(vertex, direction);
+            if current_dot > largest_dot {
+                largest_dot = current_dot;
+                largest_vertex = vertex;
+            }
+        }
+    }
+
+    return largest_vertex;
+}
+
+get_support :: (vertices: KodaVertices($N), direction: Vector3, transform: Matrix4) -> Vector3 {
+    transformed_direction := (transform * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
+
+    largest_dot := dot(vertices[0], transformed_direction);
+    largest_vertex := vertices[0];
+    for i: 1..vertices.count - 1 {
+        vertex := vertices[i];
+
+        current_dot := dot(vertex, transformed_direction);
+        if current_dot > largest_dot {
+            largest_dot = current_dot;
+            largest_vertex = vertex;
+        }
+    }
+
+    largest_vertex = (transform * Vector4.{largest_vertex.x, largest_vertex.y, largest_vertex.z, 1}).xyz;
+
+    return largest_vertex;
+}
+
+// would be easy to add one with both velocity and transform but I haven't yet
 
 #scope_file
 
@@ -185,34 +252,6 @@ solve_simplex4 :: (simplex: *Simplex, direction: Vector3) -> bool, Vector3 {
     }
 
     return true, .{0, 0, 0};
-}
-
-get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
-    largest_dot := dot(vertices[0], direction);
-    largest_vertex := vertices[0];
-    for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
-
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
-
-    if dot(velocity, velocity) > 0 {
-        for i: 0..vertices.count - 1 {
-            vertex := vertices[i] + velocity;
-
-            current_dot := dot(vertex, direction);
-            if current_dot > largest_dot {
-                largest_dot = current_dot;
-                largest_vertex = vertex;
-            }
-        }
-    }
-
-    return largest_vertex;
 }
 
 same_direction :: (a: Vector3, b: Vector3) -> bool {

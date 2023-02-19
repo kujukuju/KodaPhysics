@@ -33,8 +33,9 @@ step_physics :: (dt: float) {
         if length_squared(a.velocity) == 0 {
             continue;
         }
+
         {
-            // just test code for now, if youre moving faster than half your aabb you could potentially clip
+            // TODO just test code for now, if youre moving faster than half your aabb you could potentially clip
             body_aabb := get_world_aabb(a);
             body_aabb.lower -= 0.01;
             body_aabb.upper += 0.01;
@@ -43,6 +44,8 @@ step_physics :: (dt: float) {
                 print("Clip warning! Needs to be a convex hull or treat the body as a bullet!\n");
             }
         }
+
+        a.collision_normals.count = 0;
 
         a.position += a.velocity * dt;
 

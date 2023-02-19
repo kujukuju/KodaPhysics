@@ -1,8 +1,9 @@
 
 // this algorithm starts off with a random line, and makes an attempt to not align the line with the directional vector in any way
 // it 
-solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, d: Vector3) -> Vector3 {
-    direction := -d;
+// solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, d: Vector3) -> Vector3 {
+solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, dir: Vector3, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3 {
+    direction := -dir;
     assert(length_squared(direction) > 0, "The direction provided must be greater than 0.");
 
     #if GJK_DIR_DEBUG {
@@ -42,12 +43,12 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
         }
     }
     simplex.count = 2;
-    simplex.a = get_support(v2, search_direction) - get_support(v1, -search_direction);
+    simplex.a = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
 
     search_normal := cross(search_direction, direction);
     search_direction = search_normal;
     search_direction = (search_direction + direction) / 2.0;
-    simplex.b = get_support(v2, search_direction) - get_support(v1, -search_direction);
+    simplex.b = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
 
     furthest_triangle: Triangle3;
     furthest_normal: Vector3;
@@ -86,7 +87,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                         }
                         
                         simplex.count = 3;
-                        simplex.c = get_support(v2, search_direction) - get_support(v1, -search_direction);
+                        simplex.c = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
 
                         if dot(cross(simplex.c - simplex.a, simplex.b - simplex.a), direction) > 0 {
                             simplex.a = b;
@@ -112,7 +113,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 }
                 
                 simplex.count = 3;
-                simplex.c = get_support(v2, search_direction) - get_support(v1, -search_direction);
+                simplex.c = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
 
                 if dot(cross(simplex.c - simplex.a, simplex.b - simplex.a), direction) > 0 {
                     simplex.a = b;
@@ -216,7 +217,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 return .{};
             }
         }
-        a := get_support(v2, search_direction) - get_support(v1, -search_direction);
+        a := get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
         
         #if GJK_DIR_DEBUG {
             if step_debug(simplex, v1, v2, search_direction) {
@@ -297,25 +298,25 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
 
 #scope_file
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
-    if vertices.count == 0 {
-        return .{};
-    }
+// get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
+//     if vertices.count == 0 {
+//         return .{};
+//     }
 
-    largest_dot := dot(vertices[0], direction);
-    largest_vertex := vertices[0];
-    for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
+//     largest_dot := dot(vertices[0], direction);
+//     largest_vertex := vertices[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices[i];
 
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
+//         current_dot := dot(vertex, direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
 
-    return largest_vertex;
-}
+//     return largest_vertex;
+// }
 
 
 
