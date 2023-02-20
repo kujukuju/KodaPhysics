@@ -38,7 +38,7 @@ solve_epa :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, tr
         }
 
         search_dir := faces[closest_face][3];
-        p := get_support(v2, search_dir) - get_support(v1, -search_dir);
+        p := get_support(v2, search_dir, transform2) - get_support(v1, -search_dir, transform1);
 
         if dot(p, search_dir) - min_dist < TOLERANCE {
             return -faces[closest_face][3] * dot(p, search_dir);

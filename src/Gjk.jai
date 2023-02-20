@@ -137,7 +137,7 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3, transform: Matrix4) -> Vector3 {
-    transformed_direction := (transform * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
+    transformed_direction := (inverse(transform) * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
 
     largest_dot := dot(vertices[0], transformed_direction);
     largest_vertex := vertices[0];
