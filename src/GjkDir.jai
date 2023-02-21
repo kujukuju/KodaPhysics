@@ -2,7 +2,7 @@
 // this algorithm starts off with a random line, and makes an attempt to not align the line with the directional vector in any way
 // it 
 // solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, d: Vector3) -> Vector3 {
-solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, dir: Vector3, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3 {
+solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), dir: Vector3, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, initial_simplex: *Simplex = null) -> Vector3, Simplex {
     direction := -dir;
     assert(length_squared(direction) > 0, "The direction provided must be greater than 0.");
 
@@ -30,29 +30,35 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
     MAX_ITERATIONS :: 64;
 
     simplex: Simplex;
-
-    search_direction := cross(direction, .{0, 1, 0});
-    if dot(search_direction, search_direction) < EPSILON {
-        search_direction = cross(direction, .{0, 0, -1});
-    }
-    search_direction = (search_direction + direction) / 2.0;
-
-    #if GJK_DIR_DEBUG {
-        if step_debug(simplex, v1, v2, search_direction) {
-            return .{};
+    search_direction: Vector3;
+    if !initial_simplex {
+        search_direction = cross(direction, .{0, 1, 0});
+        if dot(search_direction, search_direction) < EPSILON {
+            search_direction = cross(direction, .{0, 0, -1});
         }
+        search_direction = (search_direction + direction) / 2.0;
+
+        #if GJK_DIR_DEBUG {
+            if step_debug(simplex, v1, v2, search_direction) {
+                return .{}, simplex;
+            }
+        }
+        simplex.count = 2;
+        simplex.a = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
+
+        search_normal := cross(search_direction, direction);
+        search_direction = search_normal;
+        search_direction = (search_direction + direction) / 2.0;
+        simplex.b = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
+    } else {
+        assert(initial_simplex.count == 3, "You can only provide an initial simplex of count 3.");
+        simplex = << initial_simplex;
     }
-    simplex.count = 2;
-    simplex.a = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
 
-    search_normal := cross(search_direction, direction);
-    search_direction = search_normal;
-    search_direction = (search_direction + direction) / 2.0;
-    simplex.b = get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
-
-    furthest_triangle: Triangle3;
-    furthest_normal: Vector3;
+    // furthest_triangle: Triangle3;
+    // furthest_normal: Vector3;
     furthest_direction: float;
+    furthest_simplex: Simplex;
 
     // this loop tries to get the direction ray to be inside the found triangle
     iterations := 0;
@@ -66,7 +72,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 if dot(abdir, abdir) < EPSILON {
                     // this means a and b are the same so return a
                     print("Bad.\n");
-                    return .{};
+                    return .{}, simplex;
                 }
                 abc := cross(abdir, ab);
                 normal := normalize(abc);
@@ -82,7 +88,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                         search_direction = cross(normal, ab);
                         #if GJK_DIR_DEBUG {
                             if step_debug(simplex, v1, v2, search_direction) {
-                                return .{};
+                                return .{}, simplex;
                             }
                         }
                         
@@ -94,9 +100,8 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                             simplex.b = a;
                         }
 
-                        furthest_triangle = create_triangle3(simplex.a, simplex.b, simplex.c);
-                        furthest_normal = normal;
-                        furthest_direction = dot(furthest_normal, furthest_triangle.a) / dot(furthest_normal, direction);
+                        furthest_direction = dot(normal, simplex.a) / dot(normal, direction);
+                        furthest_simplex = simplex;
                         break;
                     } else {
                         // the point is aligned with the line, but doesn't fall on the line
@@ -108,7 +113,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
 
                 #if GJK_DIR_DEBUG {
                     if step_debug(simplex, v1, v2, search_direction) {
-                        return .{};
+                        return .{}, simplex;
                     }
                 }
                 
@@ -128,13 +133,13 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
 
                 #if GJK_DIR_DEBUG {
                     if step_debug(simplex, v1, v2, .{0, 0, 0}) {
-                        return .{};
+                        return .{}, simplex;
                     }
                 }
 
                 if dot(abc, abc) < EPSILON {
                     // this means the triangle is basically a line, so we'll return whatever we've found so far because if this happens presumably we're at the end
-                    return .{};
+                    return .{}, simplex;
                 }
 
                 normal := normalize(abc);
@@ -145,7 +150,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                     }
                     // the triangle is vertically aligned with desired direction
                     // or the triangle is facing the opposite direction
-                    return .{};
+                    return .{}, simplex;
                 }
 
                 projected := dot(a, normal) / dot(normal, direction) * direction;
@@ -170,9 +175,8 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                     simplex.count = 2;
                 } else {
                     // the point is inside the triangle
-                    furthest_triangle = create_triangle3(simplex.a, simplex.b, simplex.c);
-                    furthest_normal = normal;
-                    furthest_direction = dot(furthest_normal, furthest_triangle.a) / dot(furthest_normal, direction);
+                    furthest_direction = dot(normal, simplex.a) / dot(normal, direction);
+                    furthest_simplex = simplex;
                     break;
                 }
         }
@@ -180,7 +184,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
         iterations += 1;
         if iterations >= MAX_ITERATIONS {
             // we haven't even found a furthest triangle yet
-            return .{};
+            return .{}, simplex;
         }
     }
 
@@ -188,7 +192,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
     for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DIR_DEBUG {
             if step_debug(simplex, v1, v2, search_direction) {
-                return .{};
+                return .{}, simplex;
             }
         }
 
@@ -199,7 +203,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
 
         if dot(bcd, bcd) < EPSILON {
             // this means the triangle is basically a line, so we'll return whatever we've found so far because if this happens presumably we're at the end
-            return -furthest_direction * direction;
+            return -furthest_direction * direction, furthest_simplex;
         }
 
         normal := normalize(bcd);
@@ -207,14 +211,14 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
         if dot(bcd, direction) < EPSILON {
             // the triangle is vertically aligned with desired direction
             // or the triangle is facing the wrong way
-            return -furthest_direction * direction;
+            return -furthest_direction * direction, furthest_simplex;
         }
 
         search_direction = bcd;
         
         #if GJK_DIR_DEBUG {
             if step_debug(simplex, v1, v2, search_direction) {
-                return .{};
+                return .{}, simplex;
             }
         }
         a := get_support(v2, search_direction, transform2) - get_support(v1, -search_direction, transform1);
@@ -229,7 +233,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 draw_line(b, a, color = .{1, 1, 1, 1});
                 draw_line(c, a, color = .{1, 1, 1, 1});
                 draw_line(d, a, color = .{1, 1, 1, 1});
-                return .{};
+                return .{}, simplex;
             }
         }
 
@@ -240,7 +244,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
                 step_debug(simplex, v1, v2, search_direction, true);
             }
             // print("should be approx equal? % %\n", -normal * dot(b, normal), -(a - normal_dist * normal));
-            return -furthest_direction * direction;
+            return -furthest_direction * direction, furthest_simplex;
             // return -normal * dot(b, normal);
             // nearest := a - normal_dist * normal;
         }
@@ -266,34 +270,31 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex
             simplex.b = b;
             simplex.c = c;
 
-            furthest_triangle = create_triangle3(a, b, c);
-            furthest_normal = normal_abc;
-            furthest_direction = dot(furthest_normal, furthest_triangle.a) / dot(furthest_normal, direction);
+            furthest_direction = dot(normal_abc, a) / dot(normal_abc, direction);
+            furthest_simplex = simplex;
         } else if dot(normal_acd, direction) > 0 && dot(cross(a - c, normal_acd), projected_acd - c) >= -EPSILON && dot(cross(ad, normal_acd), projected_acd - d) >= -EPSILON {
             // were in triangle acd
             simplex.a = a;
             simplex.b = c;
             simplex.c = d;
 
-            furthest_triangle = create_triangle3(a, c, d);
-            furthest_normal = normal_acd;
-            furthest_direction = dot(furthest_normal, furthest_triangle.a) / dot(furthest_normal, direction);
+            furthest_direction = dot(normal_acd, a) / dot(normal_acd, direction);
+            furthest_simplex = simplex;
         } else if dot(normal_adb, direction) > 0 && dot(cross(a - d, normal_adb), projected_adb - d) >= -EPSILON && dot(cross(ab, normal_adb), projected_adb - b) >= -EPSILON {
             // were in triangle adb
             simplex.a = a;
             simplex.b = d;
             simplex.c = b;
 
-            furthest_triangle = create_triangle3(a, d, b);
-            furthest_normal = normal_adb;
-            furthest_direction = dot(furthest_normal, furthest_triangle.a) / dot(furthest_normal, direction);
+            furthest_direction = dot(normal_adb, a) / dot(normal_adb, direction);
+            furthest_simplex = simplex;
         } else {
             // here I don't know what's happening so return the furthest triangle
-            return furthest_direction * direction;
+            return furthest_direction * direction, furthest_simplex;
         }
     }
 
-    return -furthest_direction * direction;
+    return -furthest_direction * direction, furthest_simplex;
 }
 
 #scope_file

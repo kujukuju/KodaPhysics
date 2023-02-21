@@ -9,6 +9,7 @@
 #load "src/MatrixMath.jai";
 #load "src/Pce.jai";
 #load "src/Shapes.jai";
+#load "src/SimplexTracker.jai";
 #load "src/Utilities.jai";
 #load "src/Vertices.jai";
 #load "src/World.jai";
@@ -20,3 +21,4 @@
 #import "BlockAllocatorJai";
 #import "Math";
 #import "Basic";
+#import "Hash_Table";
