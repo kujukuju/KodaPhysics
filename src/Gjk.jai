@@ -4,87 +4,81 @@ Simplex :: struct {
     c: Vector3;
     d: Vector3;
 
-    a1: Vector3;
-    b1: Vector3;
-    c1: Vector3;
-    d1: Vector3;
-
-    a2: Vector3;
-    b2: Vector3;
-    c2: Vector3;
-    d2: Vector3;
-
     count: int;
 
 #place a;
-    ab: [2] Vector3 = ---;
-#place b;
-    bc: [2] Vector3 = ---;
-#place c;
-    cd: [2] Vector3 = ---;
-#place a;
-    abc: [3] Vector3 = ---;
-#place b;
-    bcd: [3] Vector3 = ---;
-#place a;
     s: [4] Vector3 = ---;
-
-#place a1;
-    ab1: [2] Vector3 = ---;
-#place b1;
-    bc1: [2] Vector3 = ---;
-#place c1;
-    cd1: [2] Vector3 = ---;
-#place a1;
-    abc1: [3] Vector3 = ---;
-#place b1;
-    bcd1: [3] Vector3 = ---;
-#place a1;
-    s1: [4] Vector3 = ---;
-
-#place a2;
-    ab2: [2] Vector3 = ---;
-#place b2;
-    bc2: [2] Vector3 = ---;
-#place c2;
-    cd2: [2] Vector3 = ---;
-#place a2;
-    abc2: [3] Vector3 = ---;
-#place b2;
-    bcd2: [3] Vector3 = ---;
-#place a2;
-    s2: [4] Vector3 = ---;
 }
 
-// solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), velocity1: Vector3 = .{0, 0, 0}, velocity2: Vector3 = .{0, 0, 0}) -> bool, Simplex {
-solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, initial_simplex: *Simplex = null) -> bool, Simplex {
+solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
     MAX_ITERATIONS :: 32;
 
-    simplex: Simplex = ---;
-    direction: Vector3;
-    if !initial_simplex {
-        simplex = .{};
-        simplex.count = 1;
+    // not actually sure I need this
+    is_valid_tetrahedron :: (simplex: Simplex) -> bool {
+        s := cross(simplex.a, simplex.b);
+        t := cross(simplex.c, simplex.d);
+        u := simplex.a - simplex.b;
+        v := simplex.c - simplex.d;
 
-        direction = v1[0] - v2[0];
-        simplex.a2 = get_support(v2, direction, transform2);
-        simplex.a1 = get_support(v1, -direction, transform1);
-        simplex.a = simplex.a2 - simplex.a1;
-        direction = -simplex.a;
+        return abs(dot(s, v) + dot(t, u)) > 0.0001;
+    }
+
+    // if objects rotate or move between frames youre not guaranteed that the previous simplex can be cached in such a way that
+    // the given point is maximal for both shapes in a given direction, so we have to track that info for caching
+
+    simplex: Simplex;
+    directions: Simplex;
+    next_direction: Vector3;
+    if !cached_directions {
+        directions.a = v1[0] - v2[0];
+        directions.count = 1;
+        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+        simplex.count = 1;
+        if dot(simplex.a, directions.a) < 0 {
+            return false, .{}, .{};
+        }
+
+        next_direction = -simplex.a;
     } else {
-        assert(initial_simplex.count == 4, "You can only provide an initial simplex of count 4.");
-        simplex = << initial_simplex;
-        simplex.a = simplex.a2 - simplex.a1;
-        simplex.b = simplex.b2 - simplex.b1;
-        simplex.c = simplex.c2 - simplex.c1;
-        simplex.d = simplex.d2 - simplex.d1;
-        collide: bool;
-        collide, direction = solve_simplex4(*simplex);
-        if collide {
-            #if GJK_DEBUG {
-                step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
+        assert(cached_directions.count == 4, "You can only provide an initial simplex of count 4.");
+        directions = << cached_directions;
+        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+        if dot(simplex.a, directions.a) < 0 {
+            return false, .{}, .{};
+        }
+        simplex.b = get_support(v2, directions.b, transform2) - get_support(v1, -directions.b, transform1);
+        if dot(simplex.b, directions.b) < 0 {
+            return false, .{}, .{};
+        }
+        simplex.c = get_support(v2, directions.c, transform2) - get_support(v1, -directions.c, transform1);
+        if dot(simplex.c, directions.c) < 0 {
+            return false, .{}, .{};
+        }
+        simplex.d = get_support(v2, directions.d, transform2) - get_support(v1, -directions.d, transform1);
+        if dot(simplex.d, directions.d) < 0 {
+            return false, .{}, .{};
+        }
+        simplex.count = 4;
+
+        if is_valid_tetrahedron(simplex) {
+            collide: bool;
+            collide, next_direction = solve_simplex4(*simplex, *directions);
+            if collide {
+                #if GJK_DEBUG {
+                    step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
+                }
+                return true, simplex, directions;
             }
-            return true, simplex;
+        } else {
+            directions.a = v1[0] - v2[0];
+            directions.count = 1;
+            simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+            simplex.count = 1;
+            if dot(simplex.a, directions.a) < 0 {
+                return false, .{}, .{};
+            }
+
+            next_direction = -simplex.a;
         }
     }
 
@@ -107,58 +101,61 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 
 
     for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DEBUG {
-            if step_debug(simplex, v1, v2, get_support(v2, direction, transform2) - get_support(v1, -direction, transform1)) {
-                return false, .{};
+            if step_debug(simplex, v1, v2, get_support(v2, next_direction, transform2) - get_support(v1, -next_direction, transform1)) {
+                return false, .{}, .{};
             }
         }
 
-        simplex.bcd = simplex.abc;
-        simplex.bcd1 = simplex.abc1;
-        simplex.bcd2 = simplex.abc2;
+        directions.d = directions.c;
+        directions.c = directions.b;
+        directions.b = directions.a;
+        directions.count += 1;
+        simplex.d = simplex.c;
+        simplex.c = simplex.b;
+        simplex.b = simplex.a;
         simplex.count += 1;
 
-        simplex.a2 = get_support(v2, direction, transform2);
-        simplex.a1 = get_support(v1, -direction, transform1);
-        simplex.a = simplex.a2 - simplex.a1;
+        directions.a = next_direction;
+        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
 
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}) {
-                return false, simplex;
+                return false, .{}, .{};
             }
         }
 
         // if the new support isn't on the opposite side of the origin, it's impossible that we enclose the origin, so exit
-        if dot(simplex.a, direction) < 0 {
+        if dot(simplex.a, next_direction) < 0 {
             #if GJK_DEBUG {
                 step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
             }
-            return false, simplex;
+            return false, .{}, .{};
         }
 
         if simplex.count == {
             case 2;
-                direction = solve_simplex2(*simplex);
+                next_direction = solve_simplex2(*simplex, *directions);
 
             case 3;
-                direction = solve_simplex3(*simplex);
+                next_direction = solve_simplex3(*simplex, *directions);
 
             case 4;
                 collide: bool;
-                collide, direction = solve_simplex4(*simplex);
+                collide, next_direction = solve_simplex4(*simplex, *directions);
                 if collide {
                     #if GJK_DEBUG {
                         step_debug(simplex, v1, v2, .{0, 1000, 0}, true);
                     }
-                    return true, simplex;
+                    return true, simplex, directions;
                 }
 
             case;
                 assert(false, "Invalid simplex dimension.");
-                return false, simplex;
+                return false, .{}, .{};
         }
     }
 
-    return false, simplex;
+    return false, .{}, .{};
 }
 
 get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
@@ -229,7 +226,7 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3, transform: Matri
 
 #scope_file
 
-solve_simplex2 :: (simplex: *Simplex) -> Vector3 {
+solve_simplex2 :: (simplex: *Simplex, directions: *Simplex) -> Vector3 {
     ab := simplex.b - simplex.a;
     ao := -simplex.a;
 
@@ -238,12 +235,13 @@ solve_simplex2 :: (simplex: *Simplex) -> Vector3 {
         return cross(cross(ab, ao), ab);
     } else {
         // the origin is closer to a
+        directions.count = 1;
         simplex.count = 1;
         return ao;
     }
 }
 
-solve_simplex3 :: (simplex: *Simplex) -> Vector3 {
+solve_simplex3 :: (simplex: *Simplex, directions: *Simplex) -> Vector3 {
     abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
     ac := simplex.c - simplex.a;
     ao := -simplex.a;
@@ -251,19 +249,21 @@ solve_simplex3 :: (simplex: *Simplex) -> Vector3 {
     if same_direction(cross(abc, ac), ao) {
         if same_direction(ac, ao) {
             // the origin is nearest to the line ac
+            directions.b = directions.c;
+            directions.count = 2;
             simplex.b = simplex.c;
-            simplex.b1 = simplex.c1;
-            simplex.b2 = simplex.c2;
             simplex.count = 2;
             return cross(cross(ac, ao), ac);
         } else {
             ab := simplex.b - simplex.a;
             if same_direction(ab, ao) {
                 // the origin is nearest to the line ab
+                directions.count = 2;
                 simplex.count = 2;
                 return cross(cross(ab, ao), ab);
             } else {
                 // the origin is nearest to the point a
+                directions.count = 1;
                 simplex.count = 1;
                 return ao;
             }
@@ -274,10 +274,12 @@ solve_simplex3 :: (simplex: *Simplex) -> Vector3 {
             ab := simplex.b - simplex.a;
             if same_direction(ab, ao) {
                 // the origin is nearest to the line ab
+                directions.count = 2;
                 simplex.count = 2;
                 return cross(cross(ab, ao), ab);
             } else {
                 // the origin is nearest to the point a
+                directions.count = 1;
                 simplex.count = 1;
                 return ao;
             }
@@ -287,49 +289,63 @@ solve_simplex3 :: (simplex: *Simplex) -> Vector3 {
                 return abc;
             } else {
                 // the origin is nearest to the triangle acb
+                directions.b, directions.c = swap(directions.b, directions.c);
                 simplex.b, simplex.c = swap(simplex.b, simplex.c);
-                simplex.b1, simplex.c1 = swap(simplex.b1, simplex.c1);
-                simplex.b2, simplex.c2 = swap(simplex.b2, simplex.c2);
                 return -abc;
             }
         }
     }
 }
 
-solve_simplex4 :: (simplex: *Simplex) -> bool, Vector3 {
+solve_simplex4 :: (simplex: *Simplex, directions: *Simplex) -> bool, Vector3 {
     abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
-    acd := cross(simplex.c - simplex.a, simplex.d - simplex.a);
-    adb := cross(simplex.d - simplex.a, simplex.b - simplex.a);
     ao := -simplex.a;
 
     if same_direction(abc, ao) {
         // the origin is nearest to the triangle abc
+        directions.count = 3;
         simplex.count = 3;
-        return false, solve_simplex3(simplex);
+        return false, solve_simplex3(simplex, directions);
     }
+
+    acd := cross(simplex.c - simplex.a, simplex.d - simplex.a);
 
     if same_direction(acd, ao) {
         // the origin is nearest to the triangle acd
+        directions.b = directions.c;
+        directions.c = directions.d;
+        directions.count = 3;
         simplex.b = simplex.c;
         simplex.c = simplex.d;
-        simplex.b1 = simplex.c1;
-        simplex.c1 = simplex.d1;
-        simplex.b2 = simplex.c2;
-        simplex.c2 = simplex.d2;
         simplex.count = 3;
-        return false, solve_simplex3(simplex);
+        return false, solve_simplex3(simplex, directions);
     }
+
+    adb := cross(simplex.d - simplex.a, simplex.b - simplex.a);
 
     if same_direction(adb, ao) {
         // the origin is nearest to the triangle adb
+        directions.c = directions.b;
+        directions.b = directions.d;
+        directions.count = 3;
         simplex.c = simplex.b;
         simplex.b = simplex.d;
-        simplex.c1 = simplex.b1;
-        simplex.b1 = simplex.d1;
-        simplex.c2 = simplex.b2;
-        simplex.b2 = simplex.d2;
         simplex.count = 3;
-        return false, solve_simplex3(simplex);
+        return false, solve_simplex3(simplex, directions);
+    }
+
+    bdc := cross(simplex.d - simplex.b, simplex.c - simplex.b);
+    bo := -simplex.b;
+
+    // we normally wouldn't have to check bdc, but since we're allowing cached simplexes we do
+    if same_direction(bdc, bo) {
+        directions.a = directions.b;
+        directions.b = directions.d;
+        directions.count = 3;
+        simplex.a = simplex.b;
+        simplex.b = simplex.d;
+        simplex.count = 3;
+        return false, solve_simplex3(simplex, directions);
     }
 
     return true, .{0, 0, 0};

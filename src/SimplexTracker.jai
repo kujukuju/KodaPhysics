@@ -67,11 +67,11 @@ get_simplex_key :: inline (a: u64, b: u64, a_shape: u64, b_shape: u64, a_entry: 
 
 #scope_file
 
-hash_function :: inline (key: SimplexKey) -> u32 {
+hash_function :: (key: SimplexKey) -> u32 {
     return key.hash;
 }
 
-compare_function :: inline (k1: SimplexKey, k2: SimplexKey) -> bool {
+compare_function :: (k1: SimplexKey, k2: SimplexKey) -> bool {
     return k1.a == k2.a && k1.b == k2.b && k1.a_shape == k2.a_shape && k1.b_shape == k2.b_shape && k1.a_entry == k2.a_entry && k1.b_entry == k2.b_entry;
 }
 

@@ -5,7 +5,6 @@ koda_physics_init :: () {
 }
 
 step_physics :: (dt: float) {
-    start := get_time();
     for *allocated_bodies {
         // TODO if the body is alive
         it.velocity += it.gravity_strength * gravity * dt;
@@ -20,10 +19,8 @@ step_physics :: (dt: float) {
         }
     }
 
-    clear_active_simplexes(*gjk_simplex_tracker);
-    clear_active_simplexes(*gjk_dir_simplex_tracker);
-
-    dirty_total += get_time() - start;
+    clear_active_simplexes(*gjk_mesh_tracker);
+    clear_active_simplexes(*gjk_hull_tracker);
 
     potential_collisions: [..] *KodaBody;
     defer array_free(potential_collisions);
@@ -52,13 +49,12 @@ step_physics :: (dt: float) {
         }
 
         a.collision_normals.count = 0;
-
+        a.on_ground = false;
         a.position += a.velocity * dt;
 
         penetrations.count = 0;
         
         // go through 1 loop to solve for all stair steps if this body can stair step
-        start = get_time();
         if a.ground_enabled && a.step_height > 0 {
             body_aabb := get_world_aabb(a);
 
@@ -81,9 +77,13 @@ step_physics :: (dt: float) {
                         shape_a := a.shapes[index_a];
 
                         if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
-                            start = get_time();
                             resolve, normal := resolve_collision_convex_hull_triangle_mesh_ground(a, b, shape_a, shape_b, index_a, index_b);
-                            stair_resolve_total += get_time() - start;
+                            if length_squared(resolve) > length_squared(largest_resolve) {
+                                largest_resolve = resolve;
+                                largest_normal = normal;
+                            }
+                        } else if shape_a.type == .ConvexHull && shape_b.type == .ConvexHull {
+                            resolve, normal := resolve_collision_convex_hull_convex_hull_ground(a, b, shape_a, shape_b, index_a, index_b);
                             if length_squared(resolve) > length_squared(largest_resolve) {
                                 largest_resolve = resolve;
                                 largest_normal = normal;
@@ -101,18 +101,17 @@ step_physics :: (dt: float) {
                 penetration.d = 0.0;
 
                 a.position += largest_resolve;
+                a.on_ground = true;
                 if dot(a.velocity, largest_normal) < 0 {
                     a.velocity = project_direction(largest_normal, a.velocity);
                     array_add(*a.collision_normals, largest_normal);
                 }
             }
         }
-        stair_total += get_time() - start;
 
         body_aabb := get_world_aabb(a);
 
         // now we need to add all penetration vectors into the list
-        start = get_time();
         potential_collisions.count = 0;
         query(tree_bodies, body_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
             if p.type == .Static {
@@ -121,9 +120,7 @@ step_physics :: (dt: float) {
 
             return true;
         }, *potential_collisions);
-        aabb_search_total += get_time() - start;
 
-        start = get_time();
         for b: potential_collisions {
             for index_b: 0..b.shapes.count - 1 {
                 shape_b := b.shapes[index_b];
@@ -133,13 +130,14 @@ step_physics :: (dt: float) {
 
                     if shape_a.type == .ConvexHull && shape_b.type == .TriangleMesh {
                         resolve_collision_convex_hull_triangle_mesh(a, b, shape_a, shape_b, index_a, index_b, *penetrations);
+                    } else if shape_a.type == .ConvexHull && shape_b.type == .ConvexHull {
+                        resolve_collision_convex_hull_convex_hull(a, b, shape_a, shape_b, index_a, index_b, *penetrations);
                     } else {
                         assert(false, "Unhandled collision combination.");
                     }
                 }
             }
         }
-        resolve_total += get_time() - start;
 
         // now we solve all the penetrations
         // we could use least squares matrix method
@@ -155,7 +153,6 @@ step_physics :: (dt: float) {
 
         iter := 0;
 
-        start = get_time();
         for i: 0..ITERATION_COUNT - 1 {
             found_penetration := false;
 
@@ -184,9 +181,6 @@ step_physics :: (dt: float) {
 
             iter += 1;
         }
-        resolve_math_total += get_time() - start;
-
-        print("Iteration count %\n", iter);
 
         velocity_accumulated: Vector3;
         for penetration: penetrations {
@@ -203,8 +197,8 @@ step_physics :: (dt: float) {
         }
     }
 
-    remove_inactive_simplexes(*gjk_simplex_tracker);
-    remove_inactive_simplexes(*gjk_dir_simplex_tracker);
+    remove_inactive_simplexes(*gjk_mesh_tracker);
+    remove_inactive_simplexes(*gjk_hull_tracker);
 }
 
 get_gravity :: () -> Vector3 {
@@ -222,10 +216,10 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
     body_vertices := *a_shape.hull.vertices;
     body_transform := get_transform(a);
 
-    // TODO convert the mesh aabb and stuff into body b space
-    assert(b.position == .{});
-    assert(b.rotation == .{});
-    assert(b.scale == .{1, 1, 1});
+    // hopefully I'm doing this right, we can only step up a certain distance, so we actually only care about shapes that are within that distance
+    body_aabb.upper.y = min(body_aabb.upper.y, body_aabb.lower.y + a.step_height);
+
+    triangle_transform := get_transform(b);
     triangles := b_shape.mesh.triangles;
 
     resolve_vector: Vector3;
@@ -236,6 +230,7 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
         resolve_normal: *Vector3;
         body_vertices: *KodaVertices;
         body_transform: Matrix4;
+        triangle_transform: Matrix4;
         step_height: float;
         velocity: Vector3;
         a: u64;
@@ -248,6 +243,7 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
     info.resolve_normal = *resolve_normal;
     info.body_vertices = body_vertices;
     info.body_transform = body_transform;
+    info.triangle_transform = triangle_transform;
     info.step_height = a.step_height;
     info.velocity = a.velocity;
     info.a = xx a;
@@ -255,12 +251,19 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
     info.a_shape = xx a_shape_index;
     info.b_shape = xx b_shape_index;
 
+    inv_triangle_transform := inverse(triangle_transform);
+    traingle_space_body_aabb := transform_aabb(inv_triangle_transform, body_aabb);
+
     time := get_time();
-    triangle_count = 0;
-    query(triangles, body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
-        triangle_count += 1;
-        triangle_normal_unscaled := cross(triangle.b - triangle.a, triangle.c - triangle.a);
+    query(triangles, traingle_space_body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
+        triangle_normal_unscaled := transform_vector(info.triangle_transform, cross(triangle.b - triangle.a, triangle.c - triangle.a));
         if dot(triangle_normal_unscaled, info.velocity) >= 0 {
+            return true;
+        }
+
+        // doing it this way doesn't account for standing on the corner of a triangle, but I think that's handled by epa
+        triangle_normal := normalize(triangle_normal_unscaled);
+        if !is_ground(triangle_normal) {
             return true;
         }
         
@@ -272,46 +275,66 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
         triangle_vertices[1] = triangle.b;
         triangle_vertices[2] = triangle.c;
 
-        inner_time := get_time();
+        gjk_directions := get_cached_simplex(*gjk_mesh_tracker, simplex_key);
+        collide, simplex, directions := solve_gjk(triangle_vertices, << info.body_vertices, transform1 = info.triangle_transform, transform2 = info.body_transform, cached_directions = gjk_directions);
 
-        // gjk_initial_simplex := get_cached_simplex(*gjk_simplex_tracker, simplex_key);
-        gjk_initial_simplex: *Simplex;
-        collide, simplex := solve_gjk(triangle_vertices, << info.body_vertices, transform2 = info.body_transform, initial_simplex = gjk_initial_simplex);
-
-        stair_gjk_total += get_time() - inner_time;
         if collide {
-            add_cached_simplex(*gjk_simplex_tracker, simplex_key, simplex);
+            add_cached_simplex(*gjk_mesh_tracker, simplex_key, directions);
 
-            triangle_normal := normalize(triangle_normal_unscaled);
-            if is_ground(triangle_normal) {
-                inner_time = get_time();
-
-                // gjk_dir_initial_simplex := get_cached_simplex(*gjk_dir_simplex_tracker, simplex_key);
-                gjk_dir_initial_simplex: *Simplex;
-                resolve_vector, resolve_simplex := solve_gjk_dir(triangle_vertices, << info.body_vertices, .{0, 1, 0}, transform2 = info.body_transform, initial_simplex = gjk_dir_initial_simplex);
-                
-                if length_squared(resolve_vector) > 0 {
-                    add_cached_simplex(*gjk_dir_simplex_tracker, simplex_key, resolve_simplex);
-
-                    stair_gjk_dir_total += get_time() - inner_time;
-                    if resolve_vector.y <= info.step_height && resolve_vector.y > info.resolve_vector.y {
-                        << info.resolve_vector = resolve_vector;
-                        << info.resolve_normal = triangle_normal;
-                    }
-                }
+            resolve_vector, resolve_normal := solve_gjk_dir(triangle_vertices, << info.body_vertices, .{0, 1, 0}, transform1 = info.triangle_transform, transform2 = info.body_transform);
+            
+            if resolve_vector.y <= info.step_height && resolve_vector.y > info.resolve_vector.y {
+                << info.resolve_vector = resolve_vector;
+                << info.resolve_normal = triangle_normal;
             }
-            // we don't currently have a way to get the normal direction of the gdk_dir function in order to evaluate whether or not it's ground, so we won't do this
         }
 
         return true;
     }, info);
-    stair_query_total += get_time() - time;
-    print("Triangle count %\n", triangle_count);
 
     return resolve_vector, resolve_normal;
 }
 
-triangle_count := 0;
+resolve_collision_convex_hull_convex_hull_ground :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, a_shape_index: int, b_shape_index: int) -> Vector3, Vector3 {
+    // TODO I could move a_aabb into b local space instead of both into world space and the check would be a lot better
+    a_aabb := get_world_aabb(a);
+    a_aabb.upper.y = min(a_aabb.upper.y, a_aabb.lower.y + a.step_height);
+
+    b_aabb := get_world_aabb(b);
+
+    if !intersects(a_aabb, b_aabb) {
+        return .{}, .{};
+    }
+
+    a_vertices := *a_shape.hull.vertices;
+    a_transform := get_transform(a);
+
+    b_vertices := *b_shape.hull.vertices;
+    b_transform := get_transform(b);
+        
+    simplex_key := get_simplex_key(xx a, xx b, xx a_shape_index, xx b_shape_index, 0, 0);
+
+    gjk_directions := get_cached_simplex(*gjk_hull_tracker, simplex_key);
+    collide, simplex, directions := solve_gjk(<< b_vertices, << a_vertices, transform1 = b_transform, transform2 = a_transform, cached_directions = gjk_directions);
+
+    final_resolve_vector: Vector3;
+    final_resolve_normal: Vector3;
+    if collide {
+        add_cached_simplex(*gjk_hull_tracker, simplex_key, directions);
+
+        resolve_vector, resolve_normal := solve_gjk_dir(<< b_vertices, << a_vertices, .{0, 1, 0}, transform1 = b_transform, transform2 = a_transform);
+        if is_ground(resolve_normal) {
+            if length_squared(resolve_vector) > 0 {
+                if resolve_vector.y <= a.step_height && resolve_vector.y > final_resolve_vector.y {
+                    final_resolve_vector = resolve_vector;
+                    final_resolve_normal = resolve_normal;
+                }
+            }
+        }
+    }
+
+    return final_resolve_vector, final_resolve_normal;
+}
 
 resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, a_shape_index: int, b_shape_index: int, penetrations: *[..] Penetration) {
     body_aabb := get_world_aabb(a);
@@ -319,15 +342,14 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     body_transform := get_transform(a);
 
     // TODO convert the mesh aabb and stuff into body b space
-    assert(b.position == .{});
-    assert(b.rotation == .{});
-    assert(b.scale == .{1, 1, 1});
+    triangle_transform := get_transform(b);
     triangles := b_shape.mesh.triangles;
 
     QueryInfo :: struct {
         penetrations: *[..] Penetration;
         body_vertices: *KodaVertices;
         body_transform: Matrix4;
+        triangle_transform: Matrix4;
         velocity: Vector3;
         a: u64;
         b: u64;
@@ -338,18 +360,17 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     info.penetrations = penetrations;
     info.body_vertices = body_vertices;
     info.body_transform = body_transform;
+    info.triangle_transform = triangle_transform;
     info.velocity = a.velocity;
     info.a = xx a;
     info.b = xx b;
     info.a_shape = xx a_shape_index;
     info.b_shape = xx b_shape_index;
 
-    query(triangles, body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
-        // triangle_normal_unscaled := cross(triangle.b - triangle.a, triangle.c - triangle.a);
-        // if dot(triangle_normal_unscaled, info.velocity) >= 0 {
-        //     return true;
-        // }
-        
+    inv_triangle_transform := inverse(triangle_transform);
+    traingle_space_body_aabb := transform_aabb(inv_triangle_transform, body_aabb);
+
+    query(triangles, traingle_space_body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
         simplex_key := get_simplex_key(info.a, info.b, info.a_shape, info.b_shape, 0, xx triangle_id);
 
         triangle_vertices: KodaVertices(3) = ---;
@@ -358,12 +379,13 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
         triangle_vertices[1] = triangle.b;
         triangle_vertices[2] = triangle.c;
 
-        // gjk_initial_simplex := get_cached_simplex(*gjk_simplex_tracker, simplex_key);
-        gjk_initial_simplex: *Simplex;
-        collide, simplex := solve_gjk(triangle_vertices, << info.body_vertices, transform2 = info.body_transform, initial_simplex = gjk_initial_simplex);
-
+        gjk_directions := get_cached_simplex(*gjk_mesh_tracker, simplex_key);
+        collide, simplex, directions := solve_gjk(triangle_vertices, << info.body_vertices, transform1 = info.triangle_transform, transform2 = info.body_transform, cached_directions = gjk_directions);
+        
         if collide {
-            resolve_vector := solve_epa(triangle_vertices, << info.body_vertices, simplex, transform2 = info.body_transform);
+            add_cached_simplex(*gjk_mesh_tracker, simplex_key, directions);
+
+            resolve_vector := solve_epa(triangle_vertices, << info.body_vertices, simplex, transform1 = info.triangle_transform, transform2 = info.body_transform);
             if length_squared(resolve_vector) > 0 {
                 penetration := array_add(info.penetrations);
                 penetration.normal = normalize(resolve_vector);
@@ -375,17 +397,50 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     }, info);
 }
 
+resolve_collision_convex_hull_convex_hull :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, a_shape_index: int, b_shape_index: int, penetrations: *[..] Penetration) {
+    // TODO I could move a_aabb into b local space instead of both into world space and the check would be a lot better
+    a_aabb := get_world_aabb(a);
+    a_aabb.upper.y = min(a_aabb.upper.y, a_aabb.lower.y + a.step_height);
+
+    b_aabb := get_world_aabb(b);
+
+    if !intersects(a_aabb, b_aabb) {
+        return;
+    }
+
+    a_vertices := *a_shape.hull.vertices;
+    a_transform := get_transform(a);
+
+    b_vertices := *b_shape.hull.vertices;
+    b_transform := get_transform(b);
+        
+    simplex_key := get_simplex_key(xx a, xx b, xx a_shape_index, xx b_shape_index, 0, 0);
+
+    gjk_directions := get_cached_simplex(*gjk_hull_tracker, simplex_key);
+    collide, simplex, directions := solve_gjk(<< b_vertices, << a_vertices, transform1 = b_transform, transform2 = a_transform, cached_directions = gjk_directions);
+
+    if collide {
+        add_cached_simplex(*gjk_hull_tracker, simplex_key, directions);
+
+        resolve_vector := solve_epa(<< b_vertices, << a_vertices, simplex, transform1 = b_transform, transform2 = a_transform);
+        if length_squared(resolve_vector) > 0 {
+            penetration := array_add(penetrations);
+            penetration.normal = normalize(resolve_vector);
+            penetration.d = dot(resolve_vector, penetration.normal);
+        }
+    }
+}
+
 is_ground :: (normal: Vector3) -> bool {
     return dot(normal, .{0, 1, 0}) >= 0.85;
 }
 
 allocated_bodies: BlockAllocator(KodaBody, 1024);
-// dynamic_bodies: [..] *KodaBody;
 tree_bodies: BoundingTree(*KodaBody);
 gravity: Vector3;
 physics_initialized: bool;
-gjk_simplex_tracker: SimplexTracker;
-gjk_dir_simplex_tracker: SimplexTracker;
+gjk_mesh_tracker: SimplexTracker;
+gjk_hull_tracker: SimplexTracker;
 
 #scope_file
 

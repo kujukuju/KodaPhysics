@@ -17,6 +17,7 @@ KodaBody :: struct {
     collision_normals: [..] Vector3;
     ground_enabled: bool = true;
     step_height: float = 0.4;
+    on_ground: bool;
 
     proxy: int = -1;
 }
@@ -86,36 +87,38 @@ get_transform :: (body: KodaBody) -> Matrix4 {
 get_world_aabb :: (body: KodaBody) -> AABB3 {
     matrix := get_transform(body);
 
-    aabb_points: [8] Vector3;
-    aabb_points[0] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.lower.z};
-    aabb_points[1] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.upper.z};
-    aabb_points[2] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.lower.z};
-    aabb_points[3] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.upper.z};
-    aabb_points[4] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.lower.z};
-    aabb_points[5] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.upper.z};
-    aabb_points[6] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.lower.z};
-    aabb_points[7] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.upper.z};
+    return transform_aabb(matrix, body.aabb);
 
-    first: Vector4 = ---;
-    first.xyz = aabb_points[0];
-    first.w = 1.0;
-    first = matrix * first;
+    // aabb_points: [8] Vector3;
+    // aabb_points[0] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.lower.z};
+    // aabb_points[1] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.upper.z};
+    // aabb_points[2] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.lower.z};
+    // aabb_points[3] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.upper.z};
+    // aabb_points[4] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.lower.z};
+    // aabb_points[5] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.upper.z};
+    // aabb_points[6] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.lower.z};
+    // aabb_points[7] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.upper.z};
 
-    aabb: AABB3 = ---;
-    aabb.lower = first.xyz;
-    aabb.upper = first.xyz;
+    // first: Vector4 = ---;
+    // first.xyz = aabb_points[0];
+    // first.w = 1.0;
+    // first = matrix * first;
 
-    for i: 1..aabb_points.count - 1 {
-        point: Vector4 = ---;
-        point.xyz = aabb_points[i];
-        point.w = 1.0;
-        point = matrix * point;
+    // aabb: AABB3 = ---;
+    // aabb.lower = first.xyz;
+    // aabb.upper = first.xyz;
 
-        aabb.lower = min(aabb.lower, point.xyz);
-        aabb.upper = max(aabb.upper, point.xyz);
-    }
+    // for i: 1..aabb_points.count - 1 {
+    //     point: Vector4 = ---;
+    //     point.xyz = aabb_points[i];
+    //     point.w = 1.0;
+    //     point = matrix * point;
 
-    return aabb;
+    //     aabb.lower = min(aabb.lower, point.xyz);
+    //     aabb.upper = max(aabb.upper, point.xyz);
+    // }
+
+    // return aabb;
 }
 
 // TODO I should be able to do all these modifications in the support function, this isnt necessary

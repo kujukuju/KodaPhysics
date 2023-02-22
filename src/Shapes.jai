@@ -24,6 +24,25 @@ MeshShape :: struct {
     triangles: BoundingTree(Triangle3);
 }
 
+create_detected_shape :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
+    temp_hull := detect_hull(vertices, indices);
+    temp_convex := detect_convex(vertices, indices);
+    temp_vertex_count := vertices.count <= MAX_VERTICES && indices.count <= MAX_VERTICES;
+
+    convex_hull := true;
+    convex_hull = convex_hull && temp_hull;
+    convex_hull = convex_hull && temp_convex;
+    convex_hull = convex_hull && temp_vertex_count;
+
+    print("convex: %\nhull: %\nvertex count: %\n\n", temp_convex, temp_hull, temp_vertex_count);
+
+    if convex_hull {
+        return create_convex_hull(vertices, indices);
+    } else {
+        return create_triangle_mesh(vertices, indices);
+    }
+}
+
 create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
     assert(vertices.count <= MAX_VERTICES, "You cannot create a polygon with more than MAX_VERTICES.");
     shape: KodaShape;
@@ -48,7 +67,6 @@ create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
 }
 
 create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
-    assert(vertices.count <= MAX_VERTICES, "You cannot create a polygon with more than MAX_VERTICES.");
     shape: KodaShape;
     shape.type = .TriangleMesh;
     shape.mesh.triangles = create_bounding_tree(Triangle3);
@@ -130,6 +148,157 @@ create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
     }
 
     return shape;
+}
+
+#scope_file
+
+detect_convex :: (vertices: [] Vector3, indices: [] int) -> bool {
+    Edge :: struct {
+        v1: Vector3;
+        v2: Vector3;
+    }
+
+    EdgeTriangles :: struct {
+        edge_triangles: [2] Triangle3;
+        edge_triangle_count: int;
+    }
+
+    hash_function :: (edge: Edge) -> u32 {
+        values: [] u32;
+        values.data = xx *edge.v1;
+        values.count = 6;
+
+        hash: u32;
+        for value: values {
+            hash ^= value;
+        }
+
+        return hash;
+    }
+
+    compare_function :: (e1: Edge, e2: Edge) -> bool {
+        return e1.v1 == e2.v1 && e1.v2 == e2.v2;
+    }
+
+    equalish :: (t1: Triangle3, t2: Triangle3) -> bool {
+        // if we can find all 3 points somewhere on the other triangle we can assume the triangles are equal regardless of order
+        // its either this, or one of the triangles is a line
+        matches := true;
+        matches = matches && (t1.a == t2.a || t1.a == t2.b || t1.a == t2.c);
+        matches = matches && (t1.b == t2.a || t1.b == t2.b || t1.b == t2.c);
+        matches = matches && (t1.c == t2.a || t1.c == t2.b || t1.c == t2.c);
+        return matches;
+    }
+
+    total_x: float64;
+    total_y: float64;
+    total_z: float64;
+
+    for p: vertices {
+        total_x += p.x;
+        total_y += p.y;
+        total_z += p.z;
+    }
+
+    center: Vector3;
+    center.x = cast(float) (total_x / vertices.count);
+    center.y = cast(float) (total_y / vertices.count);
+    center.z = cast(float) (total_z / vertices.count);
+
+    edge_triangles: Table(Edge, EdgeTriangles, hash_function, compare_function);
+    edge_triangles.allocator = temp;
+
+    return true;
+}
+
+detect_hull :: (vertices: [] Vector3, indices: [] int) -> bool {
+    Edge :: struct {
+        v1: Vector3;
+        v2: Vector3;
+    }
+
+    EdgeTriangles :: struct {
+        edge_triangles: [2] Triangle3;
+        edge_triangle_count: int;
+    }
+
+    hash_function :: (edge: Edge) -> u32 {
+        values: [] u32;
+        values.data = xx *edge.v1;
+        values.count = 6;
+
+        hash: u32;
+        for value: values {
+            hash ^= value;
+        }
+
+        return hash;
+    }
+
+    compare_function :: (e1: Edge, e2: Edge) -> bool {
+        return e1.v1 == e2.v1 && e1.v2 == e2.v2;
+    }
+
+    equalish :: (t1: Triangle3, t2: Triangle3) -> bool {
+        // if we can find all 3 points somewhere on the other triangle we can assume the triangles are equal regardless of order
+        // its either this, or one of the triangles is a line
+        matches := true;
+        matches = matches && (t1.a == t2.a || t1.a == t2.b || t1.a == t2.c);
+        matches = matches && (t1.b == t2.a || t1.b == t2.b || t1.b == t2.c);
+        matches = matches && (t1.c == t2.a || t1.c == t2.b || t1.c == t2.c);
+        return matches;
+    }
+
+    edge_triangles: Table(Edge, EdgeTriangles, hash_function, compare_function);
+    edge_triangles.allocator = temp;
+
+    index := 0;
+    while index < indices.count {
+        defer index += 3;
+        
+        v1 := vertices[indices[index]];
+        v2 := vertices[indices[index + 1]];
+        v3 := vertices[indices[index + 2]];
+
+        edges: [6] Edge;
+        edges[0] = .{v1, v2};
+        edges[1] = .{v2, v1};
+        edges[2] = .{v2, v3};
+        edges[3] = .{v3, v2};
+        edges[4] = .{v3, v1};
+        edges[5] = .{v1, v3};
+
+        triangle := create_triangle3(v1, v2, v3);
+
+        for edge: edges {
+            edge_info := find_or_add(*edge_triangles, edge);
+            for i: 0..edge_info.edge_triangle_count - 1 {
+                // if the triangle is already accounted for check the next edge
+                if equalish(triangle, edge_info.edge_triangles[i]) {
+                    continue edge;
+                }
+            }
+
+            // if it gets to this point it hasn't found the triangle, so we'll add it
+            if edge_info.edge_triangle_count < 2 {
+                edge_info.edge_triangles[edge_info.edge_triangle_count] = triangle;
+                edge_info.edge_triangle_count += 1;
+                continue edge;
+            } else {
+                // if there are already 2 triangles we have a weird mesh
+                print("Potential convex hull has an edge with 3+ triangles. %\n", edge);
+                return false;
+            }
+        }
+    }
+
+    for edge_info: edge_triangles {
+        if edge_info.edge_triangle_count != 2 {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 #scope_export
