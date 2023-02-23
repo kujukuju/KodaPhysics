@@ -1,5 +1,5 @@
 
-solve_epa :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3 {
+solve_epa :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), simplex: Simplex, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3 {
     MAX_ITERATIONS :: 64;
     MAX_FACES :: 64;
     MAX_LOOSE_EDGES :: 32;

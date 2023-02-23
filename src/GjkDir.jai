@@ -2,7 +2,7 @@
 // this algorithm starts off with a random line, and makes an attempt to not align the line with the directional vector in any way
 // it 
 // solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), simplex: Simplex, d: Vector3) -> Vector3 {
-solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), dir: Vector3, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3, Vector3 {
+solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity) -> Vector3, Vector3 {
     direction := -dir;
     assert(length_squared(direction) > 0, "The direction provided must be greater than 0.");
 
@@ -82,7 +82,7 @@ solve_gjk_dir :: (v1: KodaVertices($N1), v2: KodaVertices($N2), dir: Vector3, tr
                 normal := normalize(abc);
 
                 projected := dot(a, normal) / dot(normal, direction) * direction;
-    
+
                 projected_normal := cross(ab, projected - a);
                 if dot(projected_normal, projected_normal) < SMALL_EPSILON {
                     t := dot(projected - a, ab) / dot(ab, ab);
@@ -401,11 +401,14 @@ get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
     get_simplex_normal :: (simplex: Simplex, direction: Vector3) -> Vector3 {
         if simplex.count == {
             case 1;
+                print("best normal is case 1\n");
                 return normalize(direction);
             case 2;
+                print("best normal is case 2\n");
                 ab := simplex.b - simplex.a;
                 return normalize(cross(cross(ab, direction), ab));
             case 3;
+                print("best normal is case 3\n");
                 abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
                 return normalize(abc);
             case;
@@ -421,9 +424,11 @@ get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
     remove_duplicate_entries(*simplex2);
 
     if simplex1.count >= simplex2.count {
+        print("Best normal is 1\n");
         return -get_simplex_normal(simplex1, -direction);
     } else {
-        return get_simplex_normal(simplex2, direction);
+        print("Best normal is 2\n");
+        return -get_simplex_normal(simplex2, -direction);
     }
 }
 

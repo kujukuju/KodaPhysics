@@ -10,7 +10,7 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
-solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
+solve_gjk :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
     MAX_ITERATIONS :: 32;
 
     // not actually sure I need this
@@ -30,7 +30,7 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 
     directions: Simplex;
     next_direction: Vector3;
     if !cached_directions {
-        directions.a = v1[0] - v2[0];
+        directions.a = v1.fixed[0] - v2.fixed[0];
         directions.count = 1;
         simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
         simplex.count = 1;
@@ -70,7 +70,7 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 
                 return true, simplex, directions;
             }
         } else {
-            directions.a = v1[0] - v2[0];
+            directions.a = v1.fixed[0] - v2.fixed[0];
             directions.count = 1;
             simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
             simplex.count = 1;
@@ -158,11 +158,11 @@ solve_gjk :: (v1: KodaVertices($N1), v2: KodaVertices($N2), transform1: Matrix4 
     return false, .{}, .{};
 }
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
-    largest_dot := dot(vertices[0], direction);
-    largest_vertex := vertices[0];
+get_support :: (vertices: *KodaVertices($N), direction: Vector3) -> Vector3 {
+    largest_dot := dot(vertices.fixed[0], direction);
+    largest_vertex := vertices.fixed[0];
     for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
+        vertex := vertices.fixed[i];
 
         current_dot := dot(vertex, direction);
         if current_dot > largest_dot {
@@ -174,11 +174,11 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
     return largest_vertex;
 }
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
-    largest_dot := dot(vertices[0], direction);
-    largest_vertex := vertices[0];
+get_support :: (vertices: *KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
+    largest_dot := dot(vertices.fixed[0], direction);
+    largest_vertex := vertices.fixed[0];
     for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
+        vertex := vertices.fixed[i];
 
         current_dot := dot(vertex, direction);
         if current_dot > largest_dot {
@@ -189,7 +189,7 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector
 
     if dot(velocity, velocity) > 0 {
         for i: 0..vertices.count - 1 {
-            vertex := vertices[i] + velocity;
+            vertex := vertices.fixed[i] + velocity;
 
             current_dot := dot(vertex, direction);
             if current_dot > largest_dot {
@@ -202,13 +202,13 @@ get_support :: (vertices: KodaVertices($N), direction: Vector3, velocity: Vector
     return largest_vertex;
 }
 
-get_support :: (vertices: KodaVertices($N), direction: Vector3, transform: Matrix4) -> Vector3 {
+get_support :: (vertices: *KodaVertices($N), direction: Vector3, transform: Matrix4) -> Vector3 {
     transformed_direction := (inverse(transform) * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
 
-    largest_dot := dot(vertices[0], transformed_direction);
-    largest_vertex := vertices[0];
+    largest_dot := dot(vertices.fixed[0], transformed_direction);
+    largest_vertex := vertices.fixed[0];
     for i: 1..vertices.count - 1 {
-        vertex := vertices[i];
+        vertex := vertices.fixed[i];
 
         current_dot := dot(vertex, transformed_direction);
         if current_dot > largest_dot {
