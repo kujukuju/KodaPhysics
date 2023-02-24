@@ -401,14 +401,11 @@ get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
     get_simplex_normal :: (simplex: Simplex, direction: Vector3) -> Vector3 {
         if simplex.count == {
             case 1;
-                print("best normal is case 1\n");
                 return normalize(direction);
             case 2;
-                print("best normal is case 2\n");
                 ab := simplex.b - simplex.a;
                 return normalize(cross(cross(ab, direction), ab));
             case 3;
-                print("best normal is case 3\n");
                 abc := cross(simplex.b - simplex.a, simplex.c - simplex.a);
                 return normalize(abc);
             case;
@@ -424,33 +421,11 @@ get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
     remove_duplicate_entries(*simplex2);
 
     if simplex1.count >= simplex2.count {
-        print("Best normal is 1\n");
         return -get_simplex_normal(simplex1, -direction);
     } else {
-        print("Best normal is 2\n");
         return -get_simplex_normal(simplex2, -direction);
     }
 }
-
-// get_support :: (vertices: KodaVertices($N), direction: Vector3) -> Vector3 {
-//     if vertices.count == 0 {
-//         return .{};
-//     }
-
-//     largest_dot := dot(vertices[0], direction);
-//     largest_vertex := vertices[0];
-//     for i: 1..vertices.count - 1 {
-//         vertex := vertices[i];
-
-//         current_dot := dot(vertex, direction);
-//         if current_dot > largest_dot {
-//             largest_dot = current_dot;
-//             largest_vertex = vertex;
-//         }
-//     }
-
-//     return largest_vertex;
-// }
 
 
 
