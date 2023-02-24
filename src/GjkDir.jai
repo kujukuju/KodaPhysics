@@ -59,7 +59,6 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
     furthest_direction: float;
     furthest_simplex1: Simplex;
-    furthest_simplex2: Simplex;
 
     // this loop tries to get the direction ray to be inside the found triangle
     iterations := 0;
@@ -110,7 +109,6 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
                         furthest_direction = dot(normal, simplex.a) / dot(normal, direction);
                         furthest_simplex1 = simplex1;
-                        furthest_simplex2 = simplex2;
                         break;
                     } else {
                         // the point is aligned with the line, but doesn't fall on the line
@@ -218,7 +216,6 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
                     // the point is inside the triangle
                     furthest_direction = dot(normal, simplex.a) / dot(normal, direction);
                     furthest_simplex1 = simplex1;
-                    furthest_simplex2 = simplex2;
                     break;
                 }
         }
@@ -252,7 +249,7 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
         if dot(bcd, bcd) < EPSILON {
             // this means the triangle is basically a line, so we'll return whatever we've found so far because if this happens presumably we're at the end
-            return -furthest_direction * direction, get_best_normal(furthest_simplex1, furthest_simplex2, dir);
+            return -furthest_direction * direction, get_best_normal(furthest_simplex1, dir);
         }
 
         normal := normalize(bcd);
@@ -260,7 +257,7 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
         if dot(bcd, direction) < EPSILON {
             // the triangle is vertically aligned with desired direction
             // or the triangle is facing the wrong way
-            return -furthest_direction * direction, get_best_normal(furthest_simplex1, furthest_simplex2, dir);
+            return -furthest_direction * direction, get_best_normal(furthest_simplex1, dir);
         }
 
         search_direction = bcd;
@@ -295,7 +292,7 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
                 step_debug(simplex, v1, v2, search_direction, true);
             }
 
-            return -furthest_direction * direction, get_best_normal(furthest_simplex1, furthest_simplex2, dir);
+            return -furthest_direction * direction, get_best_normal(furthest_simplex1, dir);
         }
 
         abc := cross(b - a, c - a);
@@ -327,7 +324,6 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
             furthest_direction = dot(normal_abc, a) / dot(normal_abc, direction);
             furthest_simplex1 = simplex1;
-            furthest_simplex2 = simplex2;
         } else if dot(normal_acd, direction) > 0 && dot(cross(a - c, normal_acd), projected_acd - c) >= -EPSILON && dot(cross(ad, normal_acd), projected_acd - d) >= -EPSILON {
             // were in triangle acd
             simplex1.a = a1;
@@ -342,7 +338,6 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
             furthest_direction = dot(normal_acd, a) / dot(normal_acd, direction);
             furthest_simplex1 = simplex1;
-            furthest_simplex2 = simplex2;
         } else if dot(normal_adb, direction) > 0 && dot(cross(a - d, normal_adb), projected_adb - d) >= -EPSILON && dot(cross(ab, normal_adb), projected_adb - b) >= -EPSILON {
             // were in triangle adb
             simplex1.a = a1;
@@ -357,23 +352,24 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
 
             furthest_direction = dot(normal_adb, a) / dot(normal_adb, direction);
             furthest_simplex1 = simplex1;
-            furthest_simplex2 = simplex2;
         } else {
             // here I don't know what's happening so return the furthest triangle
-            return -furthest_direction * direction, get_best_normal(furthest_simplex1, furthest_simplex2, dir);
+            return -furthest_direction * direction, get_best_normal(furthest_simplex1, dir);
         }
     }
 
-    return -furthest_direction * direction, get_best_normal(furthest_simplex1, furthest_simplex2, dir);
+    return -furthest_direction * direction, get_best_normal(furthest_simplex1, dir);
 }
 
 #scope_file
 
-get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
+get_best_normal :: (s: Simplex, direction: Vector3) -> Vector3 {
     // get the most restricting normal of the two simplexes
     // a point normal is just direction
     // a line normal is the orthogonal to the line towards direction
     // a plane normal is the plane normal
+
+    // I think since we're always offsetting b from a given ground we only want the normal of a, so we can remove half this logic
 
     remove_duplicate_entries :: (simplex: *Simplex) {
         i := 0;
@@ -414,17 +410,21 @@ get_best_normal :: (s1: Simplex, s2: Simplex, direction: Vector3) -> Vector3 {
         }
     }
 
-    simplex1 := s1;
-    simplex2 := s2;
+    simplex := s;
+    remove_duplicate_entries(*simplex);
+    return -get_simplex_normal(simplex, -direction);
 
-    remove_duplicate_entries(*simplex1);
-    remove_duplicate_entries(*simplex2);
+    // simplex1 := s1;
+    // simplex2 := s2;
 
-    if simplex1.count >= simplex2.count {
-        return -get_simplex_normal(simplex1, -direction);
-    } else {
-        return -get_simplex_normal(simplex2, -direction);
-    }
+    // remove_duplicate_entries(*simplex1);
+    // remove_duplicate_entries(*simplex2);
+
+    // if simplex1.count >= simplex2.count {
+    //     return -get_simplex_normal(simplex1, -direction);
+    // } else {
+    //     return -get_simplex_normal(simplex2, -direction);
+    // }
 }
 
 
