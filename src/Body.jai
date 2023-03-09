@@ -17,7 +17,6 @@ KodaBody :: struct {
     collision_normals: [..] Vector3;
     ground_enabled: bool = true;
     step_height: float = 0.4;
-    on_ground: bool;
 
     proxy: int = -1;
 }

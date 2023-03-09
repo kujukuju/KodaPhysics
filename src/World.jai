@@ -49,7 +49,6 @@ step_physics :: (dt: float) {
         }
 
         a.collision_normals.count = 0;
-        a.on_ground = false;
         a.position += a.velocity * dt;
 
         penetrations.count = 0;
@@ -114,9 +113,8 @@ step_physics :: (dt: float) {
                 penetration.d = 0.0;
 
                 a.position += largest_resolve;
-                a.on_ground = true;
                 if dot(a.velocity, largest_normal) < 0 {
-                    a.velocity = project_direction(largest_normal, a.velocity);
+                    a.velocity.y = project_direction(largest_normal, a.velocity).y;
                     array_add(*a.collision_normals, largest_normal);
                 }
             }
@@ -236,7 +234,7 @@ set_gravity :: (g: Vector3) {
 }
 
 is_ground :: (normal: Vector3) -> bool {
-    return dot(normal, .{0, 1, 0}) >= 0.85;
+    return dot(normal, .{0, 1, 0}) >= 0.70;
 }
 
 #scope_module
