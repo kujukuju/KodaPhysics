@@ -16,9 +16,16 @@
 
 #scope_module
 
+serializer: Serializer;
+
 #import "JaiBoundingTree";
 #import "JaiMath";
+#import "JaiSerializer";
 #import "BlockAllocatorJai";
+
 #import "Math";
 #import "Basic";
 #import "Hash_Table";
+#import "File_Utilities";
+#import "File";
+#import "Hash";
