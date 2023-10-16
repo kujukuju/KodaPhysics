@@ -16,6 +16,13 @@ operator *[] :: (vertices: *KodaVertices, i: int) -> *Vector3 {
     return *vertices.fixed[i];
 }
 
+create_vertices :: (fixed: [$N] Vector3) -> KodaVertices(N) {
+    vertices: KodaVertices(N);
+    vertices.count = N;
+    vertices.fixed = fixed;
+    return vertices;
+}
+
 add :: (vertices: *KodaVertices($N), v: Vector3) {
     if vertices.count < N {
         vertices.fixed[vertices.count] = v;

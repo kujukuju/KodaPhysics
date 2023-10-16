@@ -18,6 +18,9 @@ KodaBody :: struct {
     ground_enabled: bool = true;
     step_height: float = 0.4;
 
+    sensor: bool = false;
+    // collision_group: u64 = 0xffffffffffffffff;
+
     proxy: int = -1;
 }
 
@@ -59,10 +62,13 @@ create_body :: (shapes: [] KodaShape, type: KodaBodyType) -> *KodaBody {
     return body;
 }
 
-load_body :: (path: string) -> *KodaBody {
+load_body :: (path: string, $fallback: () -> *KodaBody) -> *KodaBody {
     file, loaded := read_entire_file(path, log_errors = false);
     if !loaded {
-        return null;
+        body := fallback();
+        save_body(body, path);
+
+        return body;
     }
 
     view: [] u8;
@@ -128,56 +134,59 @@ serialize_body :: (body: KodaBody) -> [..] u8 {
     // write all members and remove from the list
 
     array_ordered_remove_by_value(*member_names, "type");
-    serializer.write(*bytes, body.type);
+    serializer_write(*bytes, body.type);
 
     array_ordered_remove_by_value(*member_names, "shapes");
-    serializer.write(*bytes, body.shapes.count);
+    serializer_write(*bytes, body.shapes.count);
     for shape: body.shapes {
-        serializer.write(*bytes, shape.type);
-        serializer.write(*bytes, shape.aabb);
+        serializer_write(*bytes, shape.type);
+        serializer_write(*bytes, shape.aabb);
         if #complete shape.type == {
             case .ConvexHull;
-                serializer.write(*bytes, shape.hull);
+                serializer_write(*bytes, shape.hull);
             case .TriangleMesh;
-                serializer.write(*bytes, shape.mesh);
+                serializer_write(*bytes, shape.mesh);
         }
     }
 
     array_ordered_remove_by_value(*member_names, "aabb");
-    serializer.write(*bytes, body.aabb);
+    serializer_write(*bytes, body.aabb);
 
     array_ordered_remove_by_value(*member_names, "position");
-    serializer.write(*bytes, body.position);
+    serializer_write(*bytes, body.position);
 
     array_ordered_remove_by_value(*member_names, "velocity");
-    serializer.write(*bytes, body.velocity);
+    serializer_write(*bytes, body.velocity);
 
     array_ordered_remove_by_value(*member_names, "rotation");
-    serializer.write(*bytes, body.rotation);
+    serializer_write(*bytes, body.rotation);
 
     array_ordered_remove_by_value(*member_names, "scale");
-    serializer.write(*bytes, body.scale);
+    serializer_write(*bytes, body.scale);
 
     array_ordered_remove_by_value(*member_names, "gravity_strength");
-    serializer.write(*bytes, body.gravity_strength);
+    serializer_write(*bytes, body.gravity_strength);
 
     array_ordered_remove_by_value(*member_names, "dirty_position");
-    serializer.write(*bytes, body.dirty_position);
+    serializer_write(*bytes, body.dirty_position);
 
     array_ordered_remove_by_value(*member_names, "dirty_rotation");
-    serializer.write(*bytes, body.dirty_rotation);
+    serializer_write(*bytes, body.dirty_rotation);
 
     array_ordered_remove_by_value(*member_names, "dirty_scale");
-    serializer.write(*bytes, body.dirty_scale);
+    serializer_write(*bytes, body.dirty_scale);
 
     array_ordered_remove_by_value(*member_names, "collision_normals");
-    serializer.write(*bytes, body.collision_normals);
+    serializer_write(*bytes, body.collision_normals);
 
     array_ordered_remove_by_value(*member_names, "ground_enabled");
-    serializer.write(*bytes, body.ground_enabled);
+    serializer_write(*bytes, body.ground_enabled);
 
     array_ordered_remove_by_value(*member_names, "step_height");
-    serializer.write(*bytes, body.step_height);
+    serializer_write(*bytes, body.step_height);
+
+    array_ordered_remove_by_value(*member_names, "sensor");
+    serializer_write(*bytes, body.sensor);
 
     array_ordered_remove_by_value(*member_names, "proxy");
     // nothing
@@ -201,63 +210,66 @@ deserialize_body :: (bytes: [] u8) -> *KodaBody {
         array_add(*member_names, member.name);
     }
 
-    index: int;
+    offset: int;
 
     array_ordered_remove_by_value(*member_names, "type");
-    serializer.read(bytes, *index, *body.type);
+    offset = serializer_read(bytes, *body.type, offset);
 
     array_ordered_remove_by_value(*member_names, "shapes");
     count: int;
-    serializer.read(bytes, *index, *count);
+    offset = serializer_read(bytes, *count, offset);
     array_reserve(*body.shapes, count);
     for i: 0..count - 1 {
         shape: KodaShape;
-        serializer.read(bytes, *index, *shape.type);
-        serializer.read(bytes, *index, *shape.aabb);
+        offset = serializer_read(bytes, *shape.type, offset);
+        offset = serializer_read(bytes, *shape.aabb, offset);
         if #complete shape.type == {
             case .ConvexHull;
-                serializer.read(bytes, *index, *shape.hull);
+                offset = serializer_read(bytes, *shape.hull, offset);
             case .TriangleMesh;
-                serializer.read(bytes, *index, *shape.mesh);
+                offset = serializer_read(bytes, *shape.mesh, offset);
         }
         array_add(*body.shapes, shape);
     }
 
     array_ordered_remove_by_value(*member_names, "aabb");
-    serializer.read(bytes, *index, *body.aabb);
+    offset = serializer_read(bytes, *body.aabb, offset);
 
     array_ordered_remove_by_value(*member_names, "position");
-    serializer.read(bytes, *index, *body.position);
+    offset = serializer_read(bytes, *body.position, offset);
 
     array_ordered_remove_by_value(*member_names, "velocity");
-    serializer.read(bytes, *index, *body.velocity);
+    offset = serializer_read(bytes, *body.velocity, offset);
 
     array_ordered_remove_by_value(*member_names, "rotation");
-    serializer.read(bytes, *index, *body.rotation);
+    offset = serializer_read(bytes, *body.rotation, offset);
 
     array_ordered_remove_by_value(*member_names, "scale");
-    serializer.read(bytes, *index, *body.scale);
+    offset = serializer_read(bytes, *body.scale, offset);
 
     array_ordered_remove_by_value(*member_names, "gravity_strength");
-    serializer.read(bytes, *index, *body.gravity_strength);
+    offset = serializer_read(bytes, *body.gravity_strength, offset);
 
     array_ordered_remove_by_value(*member_names, "dirty_position");
-    serializer.read(bytes, *index, *body.dirty_position);
+    offset = serializer_read(bytes, *body.dirty_position, offset);
 
     array_ordered_remove_by_value(*member_names, "dirty_rotation");
-    serializer.read(bytes, *index, *body.dirty_rotation);
+    offset = serializer_read(bytes, *body.dirty_rotation, offset);
 
     array_ordered_remove_by_value(*member_names, "dirty_scale");
-    serializer.read(bytes, *index, *body.dirty_scale);
+    offset = serializer_read(bytes, *body.dirty_scale, offset);
 
     array_ordered_remove_by_value(*member_names, "collision_normals");
-    serializer.read(bytes, *index, *body.collision_normals);
+    offset = serializer_read(bytes, *body.collision_normals, offset);
 
     array_ordered_remove_by_value(*member_names, "ground_enabled");
-    serializer.read(bytes, *index, *body.ground_enabled);
+    offset = serializer_read(bytes, *body.ground_enabled, offset);
 
     array_ordered_remove_by_value(*member_names, "step_height");
-    serializer.read(bytes, *index, *body.step_height);
+    offset = serializer_read(bytes, *body.step_height, offset);
+
+    array_ordered_remove_by_value(*member_names, "sensor");
+    offset = serializer_read(bytes, *body.sensor, offset);
 
     array_ordered_remove_by_value(*member_names, "proxy");
     body.proxy = create_proxy(*tree_bodies, get_world_aabb(body), body);

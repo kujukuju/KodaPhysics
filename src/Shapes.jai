@@ -150,7 +150,7 @@ create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
 
 detect_convex_hull :: (vertices: [] Vector3, indices: [] int) -> bool {
     // 1. each edge must have 2 triangles
-    // 2. the dot product of the normal of each 2 adjacent triangles must be negative (pointing away from each other)\
+    // 2. the dot product of the normal of each 2 adjacent triangles must be negative (pointing away from each other)
 
     EPSILON :: 0.0001;
 
