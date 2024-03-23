@@ -20,7 +20,6 @@
 #import "JaiMath";
 #import "JaiSerializer";
 #import "BlockAllocatorJai";
-#import "JaiCapture";
 
 #import "Math";
 #import "Basic";

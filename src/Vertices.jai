@@ -8,20 +8,20 @@ operator [] :: (vertices: KodaVertices, i: int) -> Vector3 {
     assert(i < vertices.count, "Out of bounds vertex access.");
 
     return vertices.fixed[i];
-}
+} @thread_isolated
 
 operator *[] :: (vertices: *KodaVertices, i: int) -> *Vector3 {
     assert(i < vertices.count, "Out of bounds vertex access.");
 
     return *vertices.fixed[i];
-}
+} @thread_isolated
 
 create_vertices :: (fixed: [$N] Vector3) -> KodaVertices(N) {
     vertices: KodaVertices(N);
     vertices.count = N;
     vertices.fixed = fixed;
     return vertices;
-}
+} @thread_isolated
 
 add :: (vertices: *KodaVertices($N), v: Vector3) {
     if vertices.count < N {

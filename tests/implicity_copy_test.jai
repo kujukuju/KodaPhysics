@@ -2,17 +2,15 @@ main :: () {
     vertices: BigStruct;
     vertices_pointer: *BigStruct = *vertices;
 
-    init_time();
-
-    start1 := get_time();
+    start1 := seconds_since_init();
     total1 := gjk_or_something(<< vertices_pointer);
-    print("Normal GJK took % ms\n", (get_time() - start1) * 1000);
+    print("Normal GJK took % ms\n", (seconds_since_init() - start1) * 1000);
 
     print("%\n", total1);
 
-    start2 := get_time();
+    start2 := seconds_since_init();
     total2 := gjk_or_something_pointer(vertices_pointer);
-    print("Pointer GJK took % ms\n", (get_time() - start2) * 1000);
+    print("Pointer GJK took % ms\n", (seconds_since_init() - start2) * 1000);
 
     print("%\n", total2);
 }

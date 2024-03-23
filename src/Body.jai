@@ -146,6 +146,8 @@ serialize_body :: (body: KodaBody) -> [..] u8 {
                 serializer_write(*bytes, shape.hull);
             case .TriangleMesh;
                 serializer_write(*bytes, shape.mesh);
+            case .Vertices;
+                serializer_write(*bytes, shape.vertices);
         }
     }
 
@@ -228,6 +230,8 @@ deserialize_body :: (bytes: [] u8) -> *KodaBody {
                 offset = serializer_read(bytes, *shape.hull, offset);
             case .TriangleMesh;
                 offset = serializer_read(bytes, *shape.mesh, offset);
+            case .Vertices;
+                offset = serializer_read(bytes, *shape.vertices, offset);
         }
         array_add(*body.shapes, shape);
     }
@@ -323,64 +327,47 @@ get_transform :: (body: KodaBody) -> Matrix4 {
     return matrix;
 }
 
+get_transform :: (body: *KodaBody) -> Matrix4 {
+    matrix := Matrix4Identity;
+    matrix = translate(matrix, body.position);
+    matrix = rotate(matrix, body.rotation);
+    matrix = scale(matrix, body.scale);
+    return matrix;
+}
+
 get_world_aabb :: (body: KodaBody) -> AABB3 {
     matrix := get_transform(body);
 
     return transform_aabb(matrix, body.aabb);
-
-    // aabb_points: [8] Vector3;
-    // aabb_points[0] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.lower.z};
-    // aabb_points[1] = Vector3.{body.aabb.lower.x, body.aabb.lower.y, body.aabb.upper.z};
-    // aabb_points[2] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.lower.z};
-    // aabb_points[3] = Vector3.{body.aabb.lower.x, body.aabb.upper.y, body.aabb.upper.z};
-    // aabb_points[4] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.lower.z};
-    // aabb_points[5] = Vector3.{body.aabb.upper.x, body.aabb.lower.y, body.aabb.upper.z};
-    // aabb_points[6] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.lower.z};
-    // aabb_points[7] = Vector3.{body.aabb.upper.x, body.aabb.upper.y, body.aabb.upper.z};
-
-    // first: Vector4 = ---;
-    // first.xyz = aabb_points[0];
-    // first.w = 1.0;
-    // first = matrix * first;
-
-    // aabb: AABB3 = ---;
-    // aabb.lower = first.xyz;
-    // aabb.upper = first.xyz;
-
-    // for i: 1..aabb_points.count - 1 {
-    //     point: Vector4 = ---;
-    //     point.xyz = aabb_points[i];
-    //     point.w = 1.0;
-    //     point = matrix * point;
-
-    //     aabb.lower = min(aabb.lower, point.xyz);
-    //     aabb.upper = max(aabb.upper, point.xyz);
-    // }
-
-    // return aabb;
 }
 
-// TODO I should be able to do all these modifications in the support function, this isnt necessary
 get_world_vertices :: (body: KodaBody, shape_index: int) -> KodaVertices(MAX_VERTICES) {
     return get_world_vertices(body, body.shapes[shape_index]);
 }
 
 get_world_vertices :: (body: KodaBody, shape: KodaShape) -> KodaVertices(MAX_VERTICES) {
-    // TODO should not do this, just offset in the support function
-    assert(shape.type == .ConvexHull, "Cannot get world vertices of a triangle mesh. It's too expensive.");
+    if #complete shape.type == {
+        case .ConvexHull;
+            matrix := get_transform(body);
+            vertices: KodaVertices(MAX_VERTICES);
+            vertices.count = shape.hull.vertices.count;
+            for vertex, index: shape.hull.vertices {
+                vertices[i] = transform_point(matrix, vertex);
+            }
+            return vertices;
 
-    matrix := get_transform(body);
-    vertices := shape.hull.vertices;
-    for i: 0..vertices.count - 1 {
-        vertex: Vector4 = ---;
-        vertex.xyz = vertices[i];
-        vertex.w = 1.0;
+        case .TriangleMesh;
+            assert(false, "Cannot get world vertices of a triangle mesh. It's too expensive.");
 
-        vertex = matrix * vertex;
-        vertices[i] = vertex.xyz;
+        case .Vertices;
+            matrix := get_transform(body);
+            vertices: KodaVertices(MAX_VERTICES);
+            vertices.count = shape.vertices.count;
+            for vertex, index: shape.vertices {
+                vertices[i] = transform_point(matrix, vertex);
+            }
+            return vertices;
     }
-
-    return vertices;
 }
 
 #scope_export

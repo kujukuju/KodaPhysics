@@ -10,7 +10,7 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
-solve_gjk :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
+solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
     MAX_ITERATIONS :: 32;
 
     // not actually sure I need this
@@ -158,7 +158,7 @@ solve_gjk :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), transform1: Matrix
     return false, .{}, .{};
 }
 
-get_support :: (vertices: *KodaVertices($N), direction: Vector3) -> Vector3 {
+get_support :: (vertices: *KodaVertices, direction: Vector3) -> Vector3 {
     largest_dot := dot(vertices.fixed[0], direction);
     largest_vertex := vertices.fixed[0];
     for i: 1..vertices.count - 1 {
@@ -174,7 +174,7 @@ get_support :: (vertices: *KodaVertices($N), direction: Vector3) -> Vector3 {
     return largest_vertex;
 }
 
-get_support :: (vertices: *KodaVertices($N), direction: Vector3, velocity: Vector3) -> Vector3 {
+get_support :: (vertices: *KodaVertices, direction: Vector3, velocity: Vector3) -> Vector3 {
     largest_dot := dot(vertices.fixed[0], direction);
     largest_vertex := vertices.fixed[0];
     for i: 1..vertices.count - 1 {
@@ -202,7 +202,7 @@ get_support :: (vertices: *KodaVertices($N), direction: Vector3, velocity: Vecto
     return largest_vertex;
 }
 
-get_support :: (vertices: *KodaVertices($N), direction: Vector3, transform: Matrix4) -> Vector3 {
+get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4) -> Vector3 {
     transformed_direction := (inverse(transform) * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
 
     largest_dot := dot(vertices.fixed[0], transformed_direction);
@@ -365,7 +365,7 @@ gjk_debug_points: [..] Vector3;
 gjk_debug_steps: int;
 gjk_debug_max_steps: int;
 
-step_debug :: (simplex: Simplex, v1: KodaVertices($N1), v2: KodaVertices($N2), support: Vector3, force_draw: bool = false) -> bool {
+step_debug :: (simplex: Simplex, v1: KodaVertices, v2: KodaVertices, support: Vector3, force_draw: bool = false) -> bool {
     if gjk_debug_steps >= gjk_debug_max_steps || force_draw {
         #import "KodaJai";
 

@@ -1,30 +1,40 @@
-KodaShape :: struct {
+
+KodaShape :: struct (V: int = MAX_VERTICES, I: int = MAX_VERTICES) {
     type: ShapeType;
-    aabb: AABB3;
 
     union {
-        hull: HullShape;
+        aabb: AABB3;
+        hull: HullShape(V, I);
         mesh: MeshShape;
+        vertices: VerticesShape(V);
     }
 }
 
 ShapeType :: enum {
     ConvexHull;
     TriangleMesh;
+    Vertices;
     // Box;
     // Sphere;
 }
 
-HullShape :: struct {
-    vertices: KodaVertices;
-    indices: KodaIndices;
+HullShape :: struct (V: int, I: int) {
+    aabb: AABB3;
+    vertices: KodaVertices(V);
+    indices: KodaIndices(I);
 }
 
 MeshShape :: struct {
+    aabb: AABB3;
     triangles: BoundingTree(Triangle3);
 }
 
-create_detected_shape :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
+VerticesShape :: struct (V: int) {
+    aabb: AABB3;
+    vertices: KodaVertices(V);
+}
+
+create_detected_shape :: (vertices: [] Vector3, indices: [] int) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
     convex_hull := vertices.count <= MAX_VERTICES && indices.count <= MAX_VERTICES;
     convex_hull = convex_hull && detect_convex_hull(vertices, indices);
 
@@ -39,9 +49,10 @@ create_detected_shape :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
     }
 }
 
-create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
+create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
     assert(vertices.count <= MAX_VERTICES, "You cannot create a polygon with more than MAX_VERTICES.");
-    shape: KodaShape;
+
+    shape: KodaShape(MAX_VERTICES, MAX_VERTICES);
     shape.type = .ConvexHull;
     shape.hull.vertices.count = vertices.count;
     shape.hull.indices.count = indices.count;
@@ -62,7 +73,27 @@ create_convex_hull :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
     return shape;
 }
 
-create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
+create_convex_hull :: (vertices: [$N] Vector3) -> KodaShape(N, 0) {
+    shape: KodaShape(N, 0);
+    shape.type = .ConvexHull;
+    shape.hull.vertices.count = vertices.count;
+
+    memcpy(shape.hull.vertices.fixed.data, vertices.data, vertices.count * size_of(Vector3));
+
+    if vertices.count > 0 {
+        shape.aabb.lower = vertices[0];
+        shape.aabb.upper = vertices[0];
+
+        for i: 1..vertices.count - 1 {
+            shape.aabb.lower = min(shape.aabb.lower, vertices[i]);
+            shape.aabb.upper = max(shape.aabb.upper, vertices[i]);
+        }
+    }
+
+    return shape;
+}
+
+create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
     shape: KodaShape;
     shape.type = .TriangleMesh;
     shape.mesh.triangles = create_bounding_tree(Triangle3);
@@ -104,7 +135,7 @@ create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape {
     return shape;
 }
 
-create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
+create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
     shape: KodaShape;
     shape.type = .TriangleMesh;
     shape.mesh.triangles = create_bounding_tree(Triangle3);
@@ -145,6 +176,28 @@ create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape {
 
     return shape;
 }
+
+// create_vertices :: (vertices: [] Vector3) -> KodaShape {
+//     assert(vertices.count <= MAX_VERTICES, "You cannot create a polygon with more than MAX_VERTICES.");
+
+//     shape: KodaShape;
+//     shape.type = .Vertices;
+//     shape.vertices.count = vertices.count;
+
+//     memcpy(shape.vertices.fixed.data, vertices.data, vertices.count * size_of(Vector3));
+
+//     if vertices.count > 0 {
+//         shape.aabb.lower = vertices[0];
+//         shape.aabb.upper = vertices[0];
+
+//         for i: 1..vertices.count - 1 {
+//             shape.aabb.lower = min(shape.aabb.lower, vertices[i]);
+//             shape.aabb.upper = max(shape.aabb.upper, vertices[i]);
+//         }
+//     }
+
+//     return shape;
+// }
 
 #scope_file
 
@@ -273,6 +326,15 @@ detect_convex_hull :: (vertices: [] Vector3, indices: [] int) -> bool {
     }
 
     return true;
+}
+
+#run {
+    shape: KodaShape(0, 0);
+    shape.aabb.lower = .{1, 2, 3};
+    shape.aabb.upper = .{4, 5, 6};
+    assert(shape.aabb == shape.hull.aabb);
+    assert(shape.aabb == shape.mesh.aabb);
+    assert(shape.aabb == shape.vertices.aabb);
 }
 
 // detect_hull :: (vertices: [] Vector3, indices: [] int) -> bool {

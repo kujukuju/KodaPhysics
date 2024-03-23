@@ -75,13 +75,11 @@ step_physics :: (dt: float, a: *KodaBody, potential_collisions: *[..] *KodaBody,
         a_aabb := get_world_aabb(a);
 
         potential_collisions.count = 0;
-        query(*tree_bodies, a_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
-            if p.type == .Static && !p.sensor {
-                array_add(potential_collisions, p);
+        for tree_body: query(*tree_bodies, a_aabb) {
+            if tree_body.type == .Static && !tree_body.sensor {
+                array_add(potential_collisions, tree_body);
             }
-
-            return true;
-        }, potential_collisions);
+        }
 
         largest_resolve: Vector3;
         largest_normal: Vector3;
@@ -159,13 +157,11 @@ step_physics :: (dt: float, a: *KodaBody, potential_collisions: *[..] *KodaBody,
 
     // now we need to add all penetration vectors into the list
     potential_collisions.count = 0;
-    query(*tree_bodies, a_aabb, (p: *KodaBody, potential_collisions: *[..] *KodaBody) -> bool {
-        if p.type == .Static && !p.sensor {
-            array_add(potential_collisions, p);
+    for body: query(*tree_bodies, a_aabb) {
+        if body.type == .Static && !body.sensor {
+            array_add(potential_collisions, body);
         }
-
-        return true;
-    }, potential_collisions);
+    }
 
     for b: potential_collisions.* {
         b_aabb := get_world_aabb(b);
@@ -263,62 +259,26 @@ get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool
     best_point: Vector3 = line.p2;
     best_normal: Vector3;
 
-    QueryData :: struct {
-        line: Line3;
-        aabb: AABB3;
-        search_direction: Vector3;
-        best_point: *Vector3;
-        best_normal: *Vector3;
-    }
-    query_data := QueryData.{
-        line,
-        aabb,
-        search_direction,
-        *best_point,
-        *best_normal,
-    };
-
-    query(*tree_bodies, aabb, (a: *KodaBody, using query_data: QueryData) -> bool {
-        if a.sensor != sensor {
-            return true;
+    for tree_body: query(*tree_bodies, aabb) {
+        if tree_body.sensor != sensor {
+            continue;
         }
 
         #if static_only {
-            if a.type != .Static {
-                return true;
+            if tree_body.type != .Static {
+                continue;
             }
         }
 
-        for *shape: a.shapes {
+        for *shape: tree_body.shapes {
             if shape.type == .TriangleMesh {
-                a_transform := get_transform(a);
+                a_transform := get_transform(tree_body);
                 inv_a_transform := inverse(a_transform);
                 a_space_body_aabb := transform_aabb(inv_a_transform, aabb);
 
                 triangles := *shape.mesh.triangles;
 
-                TriangleData :: struct {
-                    line: Line3;
-                    a_transform: Matrix4;
-                    search_direction: Vector3;
-                    best_point: *Vector3;
-                    best_normal: *Vector3;
-                };
-                triangle_data := TriangleData.{
-                    line,
-                    a_transform,
-                    search_direction,
-                    best_point,
-                    best_normal,
-                };
-
-                query(triangles, a_space_body_aabb, (triangle: Triangle3, using triangle_data: TriangleData) -> bool {
-                    triangle_vertices: KodaVertices(3) = ---;
-                    triangle_vertices.count = 3;
-                    triangle_vertices[0] = triangle.a;
-                    triangle_vertices[1] = triangle.b;
-                    triangle_vertices[2] = triangle.c;
-
+                for triangle: query(triangles, a_space_body_aabb) {
                     world_triangle: Triangle3 = .{
                         transform_point(a_transform, triangle.a),
                         transform_point(a_transform, triangle.b),
@@ -327,15 +287,13 @@ get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool
 
                     found_point, hit := intersection(world_triangle, line);
                     if hit && dot(found_point - line.p2, search_direction) > dot(best_point - line.p2, search_direction) {
-                        best_point.* = found_point;
-                        best_normal.* = get_normal(world_triangle);
+                        best_point = found_point;
+                        best_normal = get_normal(world_triangle);
                     }
-
-                    return true;
-                }, triangle_data);
+                }
             } else if shape.type == .ConvexHull {
                 // theres probably a better way to do this
-                a_transform := get_transform(a);
+                a_transform := get_transform(tree_body);
                 for i: 0..shape.hull.indices.count / 3 - 1 {
                     index1 := shape.hull.indices[i * 3];
                     index2 := shape.hull.indices[i * 3 + 1];
@@ -348,15 +306,13 @@ get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool
 
                     found_point, hit := intersection(world_triangle, line);
                     if hit && dot(found_point - line.p2, search_direction) > dot(best_point - line.p2, search_direction) {
-                        best_point.* = found_point;
-                        best_normal.* = get_normal(world_triangle);
+                        best_point = found_point;
+                        best_normal = get_normal(world_triangle);
                     }
                 }
             }
         }
-
-        return true;
-    }, query_data);
+    }
 
     return best_point, best_normal, best_point != line.p2;
 }
@@ -376,49 +332,21 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
     final_bodies: [..] *KodaBody;
     final_bodies.allocator = temp;
 
-    QueryData :: struct {
-        vertices: *KodaVertices(N);
-        transform: Matrix4;
-        aabb: AABB3;
-        final_bodies: *[..] *KodaBody;
-        include_body: *KodaBody;
-    }
-    query_data := QueryData.{
-        vertices,
-        transform,
-        aabb,
-        *final_bodies,
-        include_body,
-    };
-
-    query(*tree_bodies, aabb, (a: *KodaBody, using query_data: QueryData) -> bool {
-        if a.sensor != sensor && a != include_body {
-            return true;
+    for tree_body: query(*tree_bodies, aabb) {
+        if tree_body.sensor != sensor && tree_body != include_body {
+            continue;
         }
 
-        for *shape: a.shapes {
+        for *shape: tree_body.shapes {
             if shape.type == .TriangleMesh {
-                a_transform := get_transform(a);
+                a_transform := get_transform(tree_body);
                 inv_a_transform := inverse(a_transform);
                 a_space_body_aabb := transform_aabb(inv_a_transform, aabb);
 
                 triangles := *shape.mesh.triangles;
                 found_collision: bool;
 
-                TriangleData :: struct {
-                    vertices: *KodaVertices(N);
-                    transform: Matrix4; 
-                    a_transform: Matrix4;
-                    found_collision: *bool;
-                };
-                triangle_data := TriangleData.{
-                    vertices,
-                    transform,
-                    a_transform,
-                    *found_collision,
-                };
-
-                query(triangles, a_space_body_aabb, (triangle: Triangle3, using triangle_data: TriangleData) -> bool {
+                for triangle: query(triangles, a_space_body_aabb) {
                     triangle_vertices: KodaVertices(3) = ---;
                     triangle_vertices.count = 3;
                     triangle_vertices[0] = triangle.a;
@@ -427,30 +355,26 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
 
                     collision := solve_gjk(*triangle_vertices, vertices, transform1 = a_transform, transform2 = transform);
                     if collision {
-                        found_collision.* = true;
-                        return false;
+                        found_collision = true;
+                        break;
                     }
-
-                    return true;
-                }, triangle_data);
+                };
 
                 if found_collision {
-                    array_add(final_bodies, a);
+                    array_add(*final_bodies, tree_body);
                 }
             } else if shape.type == .ConvexHull {
                 a_vertices := *shape.hull.vertices;
-                a_transform := get_transform(a);
+                a_transform := get_transform(tree_body);
                 body_vertices := vertices;
                 body_transform := transform;
 
                 if solve_gjk(a_vertices, body_vertices, a_transform, body_transform) {
-                    array_add(final_bodies, a);
+                    array_add(*final_bodies, tree_body);
                 }
             }
         }
-
-        return true;
-    }, query_data);
+    }
 
     return final_bodies;
 }
@@ -494,49 +418,23 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
     resolve_vector: Vector3;
     resolve_normal: Vector3;
 
-    QueryInfo :: struct {
-        resolve_vector: *Vector3;
-        resolve_normal: *Vector3;
-        body_vertices: *KodaVertices;
-        body_transform: Matrix4;
-        triangle_transform: Matrix4;
-        step_height: float;
-        velocity: Vector3;
-        a: u64;
-        b: u64;
-        a_shape: u64;
-        b_shape: u64;
-    }
-    info: QueryInfo;
-    info.resolve_vector = *resolve_vector;
-    info.resolve_normal = *resolve_normal;
-    info.body_vertices = body_vertices;
-    info.body_transform = body_transform;
-    info.triangle_transform = triangle_transform;
-    info.step_height = a.step_height;
-    info.velocity = a.velocity;
-    info.a = xx a;
-    info.b = xx b;
-    info.a_shape = xx a_shape_index;
-    info.b_shape = xx b_shape_index;
-
     inv_triangle_transform := inverse(triangle_transform);
     triangle_space_body_aabb := transform_aabb(inv_triangle_transform, body_aabb);
 
-    time := get_time();
-    query(triangles, triangle_space_body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
-        triangle_normal_unscaled := transform_vector(info.triangle_transform, cross(triangle.b - triangle.a, triangle.c - triangle.a));
+    time := seconds_since_init();
+    for triangle, triangle_id: query(triangles, triangle_space_body_aabb) {
+        triangle_normal_unscaled := transform_vector(triangle_transform, cross(triangle.b - triangle.a, triangle.c - triangle.a));
         if dot(triangle_normal_unscaled, .{0, 1, 0}) < 0 {
-            return true;
+            continue;
         }
 
         // doing it this way doesn't account for standing on the corner of a triangle, but I think that's handled by epa
         triangle_normal := normalize(triangle_normal_unscaled);
         if !is_ground(triangle_normal) {
-            return true;
+            continue;
         }
         
-        simplex_key := get_simplex_key(info.a, info.b, info.a_shape, info.b_shape, 0, xx triangle_id);
+        simplex_key := get_simplex_key(xx a, xx b, xx a_shape_index, xx b_shape_index, 0, xx triangle_id);
 
         triangle_vertices: KodaVertices(3) = ---;
         triangle_vertices.count = 3;
@@ -545,20 +443,18 @@ resolve_collision_convex_hull_triangle_mesh_ground :: (a: *KodaBody, b: *KodaBod
         triangle_vertices[2] = triangle.c;
 
         gjk_directions := get_cached_simplex(*gjk_mesh_tracker, simplex_key);
-        collide, simplex, directions := solve_gjk(*triangle_vertices, info.body_vertices, transform1 = info.triangle_transform, transform2 = info.body_transform, cached_directions = gjk_directions);
+        collide, simplex, directions := solve_gjk(*triangle_vertices, body_vertices, transform1 = triangle_transform, transform2 = body_transform, cached_directions = gjk_directions);
 
         if collide {
             add_cached_simplex(*gjk_mesh_tracker, simplex_key, directions);
 
-            resolve_vector := solve_gjk_dir(*triangle_vertices, info.body_vertices, .{0, 1, 0}, transform1 = info.triangle_transform, transform2 = info.body_transform);
-            if resolve_vector.y <= info.step_height && resolve_vector.y > info.resolve_vector.y {
-                << info.resolve_vector = resolve_vector;
-                << info.resolve_normal = normalize(triangle_normal_unscaled);
+            gjk_resolve_vector := solve_gjk_dir(*triangle_vertices, body_vertices, .{0, 1, 0}, transform1 = triangle_transform, transform2 = body_transform);
+            if gjk_resolve_vector.y <= a.step_height && gjk_resolve_vector.y > resolve_vector.y {
+                resolve_vector = gjk_resolve_vector;
+                resolve_normal = normalize(triangle_normal_unscaled);
             }
         }
-
-        return true;
-    }, info);
+    };
 
     return resolve_vector, resolve_normal;
 }
@@ -604,33 +500,11 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
     triangle_transform := get_transform(b);
     triangles := *b_shape.mesh.triangles;
 
-    QueryInfo :: struct {
-        penetrations: *[..] Penetration;
-        body_vertices: *KodaVertices;
-        body_transform: Matrix4;
-        triangle_transform: Matrix4;
-        velocity: Vector3;
-        a: u64;
-        b: u64;
-        a_shape: u64;
-        b_shape: u64;
-    }
-    info: QueryInfo;
-    info.penetrations = penetrations;
-    info.body_vertices = body_vertices;
-    info.body_transform = body_transform;
-    info.triangle_transform = triangle_transform;
-    info.velocity = a.velocity;
-    info.a = xx a;
-    info.b = xx b;
-    info.a_shape = xx a_shape_index;
-    info.b_shape = xx b_shape_index;
-
     inv_triangle_transform := inverse(triangle_transform);
     triangle_space_body_aabb := transform_aabb(inv_triangle_transform, body_aabb);
 
-    query(triangles, triangle_space_body_aabb, (triangle: Triangle3, info: QueryInfo, triangle_id: int) -> bool {
-        simplex_key := get_simplex_key(info.a, info.b, info.a_shape, info.b_shape, 0, xx triangle_id);
+    for triangle, triangle_id: query(triangles, triangle_space_body_aabb) {
+        simplex_key := get_simplex_key(xx a, xx b, xx a_shape_index, xx b_shape_index, 0, xx triangle_id);
 
         triangle_vertices: KodaVertices(3) = ---;
         triangle_vertices.count = 3;
@@ -639,21 +513,19 @@ resolve_collision_convex_hull_triangle_mesh :: (a: *KodaBody, b: *KodaBody, a_sh
         triangle_vertices[2] = triangle.c;
 
         gjk_directions := get_cached_simplex(*gjk_mesh_tracker, simplex_key);
-        collide, simplex, directions := solve_gjk(*triangle_vertices, info.body_vertices, transform1 = info.triangle_transform, transform2 = info.body_transform, cached_directions = gjk_directions);
+        collide, simplex, directions := solve_gjk(*triangle_vertices, body_vertices, transform1 = triangle_transform, transform2 = body_transform, cached_directions = gjk_directions);
         
         if collide {
             add_cached_simplex(*gjk_mesh_tracker, simplex_key, directions);
 
-            resolve_vector := solve_epa(*triangle_vertices, info.body_vertices, simplex, transform1 = info.triangle_transform, transform2 = info.body_transform);
+            resolve_vector := solve_epa(*triangle_vertices, body_vertices, simplex, transform1 = triangle_transform, transform2 = body_transform);
             if length_squared(resolve_vector) > 0 {
-                penetration := array_add(info.penetrations);
+                penetration := array_add(penetrations);
                 penetration.normal = normalize(resolve_vector);
                 penetration.d = dot(resolve_vector, penetration.normal);
             }
         }
-
-        return true;
-    }, info);
+    };
 }
 
 resolve_collision_convex_hull_convex_hull :: (a: *KodaBody, b: *KodaBody, a_shape: KodaShape, b_shape: KodaShape, a_shape_index: int, b_shape_index: int, penetrations: *[..] Penetration) {
