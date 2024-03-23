@@ -317,7 +317,7 @@ get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool
     return best_point, best_normal, best_point != line.p2;
 }
 
-get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor: bool = false, include_body: *KodaBody = null) -> [] *KodaBody {
+get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor: bool = false, exclude_body: *KodaBody = null) -> [] *KodaBody {
     if vertices.count == 0 {
         return .[];
     }
@@ -333,7 +333,11 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
     final_bodies.allocator = temp;
 
     for tree_body: query(*tree_bodies, aabb) {
-        if tree_body.sensor != sensor && tree_body != include_body {
+        if tree_body.sensor != sensor {
+            continue;
+        }
+
+        if tree_body == exclude_body {
             continue;
         }
 
