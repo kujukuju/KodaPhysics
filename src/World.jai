@@ -317,17 +317,10 @@ get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool
     return best_point, best_normal, best_point != line.p2;
 }
 
-get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor: bool = false, exclude_body: *KodaBody = null) -> [] *KodaBody {
-    if vertices.count == 0 {
-        return .[];
-    }
+get_body_collisions :: (shape: *HullShape, transform: Matrix4, $sensor: bool = false, $static: bool = false, $dynamic: bool = false) -> [] *KodaBody {
+    #run assert(static || dynamic, "You cannot get bodies without specifying static or dynamic bodies.\n");
 
-    aabb: AABB3 = .{vertices.*[0], vertices.*[0]};
-    for i: 1..vertices.count - 1 {
-        aabb.lower = min(aabb.lower, vertices.*[i]);
-        aabb.upper = max(aabb.upper, vertices.*[i]);
-    }
-    aabb = transform_aabb(transform, aabb);
+    aabb := transform_aabb(transform, shape.aabb);
 
     final_bodies: [..] *KodaBody;
     final_bodies.allocator = temp;
@@ -337,17 +330,25 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
             continue;
         }
 
-        if tree_body == exclude_body {
-            continue;
+        #if !static {
+            if tree_body.type == .Static {
+                continue;
+            }
         }
 
-        for *shape: tree_body.shapes {
-            if shape.type == .TriangleMesh {
+        #if !dynamic {
+            if tree_body.type == .Dynamic {
+                continue;
+            }
+        }
+
+        for *body_shape: tree_body.shapes {
+            if body_shape.type == .TriangleMesh {
                 a_transform := get_transform(tree_body);
                 inv_a_transform := inverse(a_transform);
                 a_space_body_aabb := transform_aabb(inv_a_transform, aabb);
 
-                triangles := *shape.mesh.triangles;
+                triangles := *body_shape.mesh.triangles;
                 found_collision: bool;
 
                 for triangle: query(triangles, a_space_body_aabb) {
@@ -357,7 +358,7 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
                     triangle_vertices[1] = triangle.b;
                     triangle_vertices[2] = triangle.c;
 
-                    collision := solve_gjk(*triangle_vertices, vertices, transform1 = a_transform, transform2 = transform);
+                    collision := solve_gjk(*triangle_vertices, *shape.vertices, transform1 = a_transform, transform2 = transform);
                     if collision {
                         found_collision = true;
                         break;
@@ -367,13 +368,11 @@ get_body_collisions :: (vertices: *KodaVertices($N), transform: Matrix4, $sensor
                 if found_collision {
                     array_add(*final_bodies, tree_body);
                 }
-            } else if shape.type == .ConvexHull {
-                a_vertices := *shape.hull.vertices;
+            } else if body_shape.type == .ConvexHull {
+                a_vertices := *body_shape.hull.vertices;
                 a_transform := get_transform(tree_body);
-                body_vertices := vertices;
-                body_transform := transform;
 
-                if solve_gjk(a_vertices, body_vertices, a_transform, body_transform) {
+                if solve_gjk(a_vertices, *shape.vertices, a_transform, transform) {
                     array_add(*final_bodies, tree_body);
                 }
             }

@@ -5,6 +5,9 @@ solve_epa :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), simplex: Simplex, 
     MAX_LOOSE_EDGES :: 32;
     TOLERANCE :: 0.0001;
 
+    inv_transform1 := inverse(transpose(inverse(transform1)));
+    inv_transform2 := inverse(transpose(inverse(transform2)));
+
     faces: [64][4] Vector3;
     faces[0][0] = simplex.a;
     faces[0][1] = simplex.b;
@@ -38,7 +41,7 @@ solve_epa :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), simplex: Simplex, 
         }
 
         search_dir := faces[closest_face][3];
-        p := get_support(v2, search_dir, transform2) - get_support(v1, -search_dir, transform1);
+        p := get_support(v2, search_dir, transform2, inv_transform2) - get_support(v1, -search_dir, transform1, inv_transform1);
 
         if dot(p, search_dir) - min_dist < TOLERANCE {
             return -faces[closest_face][3] * dot(p, search_dir);

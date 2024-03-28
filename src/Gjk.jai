@@ -10,8 +10,12 @@ Simplex :: struct {
     s: [4] Vector3 = ---;
 }
 
+debug_gjk := false;
 solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
     MAX_ITERATIONS :: 32;
+
+    inv_transform1 := inverse(transpose(inverse(transform1)));
+    inv_transform2 := inverse(transpose(inverse(transform2)));
 
     // not actually sure I need this
     is_valid_tetrahedron :: (simplex: Simplex) -> bool {
@@ -32,7 +36,7 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
     if !cached_directions {
         directions.a = v1.fixed[0] - v2.fixed[0];
         directions.count = 1;
-        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+        simplex.a = get_support(v2, directions.a, transform2, inv_transform2) - get_support(v1, -directions.a, transform1, inv_transform1);
         simplex.count = 1;
         if dot(simplex.a, directions.a) < 0 {
             return false, .{}, .{};
@@ -42,19 +46,19 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
     } else {
         assert(cached_directions.count == 4, "You can only provide an initial simplex of count 4.");
         directions = << cached_directions;
-        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+        simplex.a = get_support(v2, directions.a, transform2, inv_transform2) - get_support(v1, -directions.a, transform1, inv_transform1);
         if dot(simplex.a, directions.a) < 0 {
             return false, .{}, .{};
         }
-        simplex.b = get_support(v2, directions.b, transform2) - get_support(v1, -directions.b, transform1);
+        simplex.b = get_support(v2, directions.b, transform2, inv_transform2) - get_support(v1, -directions.b, transform1, inv_transform1);
         if dot(simplex.b, directions.b) < 0 {
             return false, .{}, .{};
         }
-        simplex.c = get_support(v2, directions.c, transform2) - get_support(v1, -directions.c, transform1);
+        simplex.c = get_support(v2, directions.c, transform2, inv_transform2) - get_support(v1, -directions.c, transform1, inv_transform1);
         if dot(simplex.c, directions.c) < 0 {
             return false, .{}, .{};
         }
-        simplex.d = get_support(v2, directions.d, transform2) - get_support(v1, -directions.d, transform1);
+        simplex.d = get_support(v2, directions.d, transform2, inv_transform2) - get_support(v1, -directions.d, transform1, inv_transform1);
         if dot(simplex.d, directions.d) < 0 {
             return false, .{}, .{};
         }
@@ -72,7 +76,7 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
         } else {
             directions.a = v1.fixed[0] - v2.fixed[0];
             directions.count = 1;
-            simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+            simplex.a = get_support(v2, directions.a, transform2, inv_transform2) - get_support(v1, -directions.a, transform1, inv_transform1);
             simplex.count = 1;
             if dot(simplex.a, directions.a) < 0 {
                 return false, .{}, .{};
@@ -101,7 +105,7 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
 
     for i: 0..MAX_ITERATIONS - 1 {
         #if GJK_DEBUG {
-            if step_debug(simplex, v1, v2, get_support(v2, next_direction, transform2) - get_support(v1, -next_direction, transform1)) {
+            if step_debug(simplex, v1, v2, get_support(v2, next_direction, transform2, inv_transform2) - get_support(v1, -next_direction, transform1, inv_transform1)) {
                 return false, .{}, .{};
             }
         }
@@ -116,7 +120,7 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
         simplex.count += 1;
 
         directions.a = next_direction;
-        simplex.a = get_support(v2, directions.a, transform2) - get_support(v1, -directions.a, transform1);
+        simplex.a = get_support(v2, directions.a, transform2, inv_transform2) - get_support(v1, -directions.a, transform1, inv_transform1);
 
         #if GJK_DEBUG {
             if step_debug(simplex, v1, v2, .{0, 1000, 0}) {
@@ -158,52 +162,52 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
     return false, .{}, .{};
 }
 
-get_support :: (vertices: *KodaVertices, direction: Vector3) -> Vector3 {
-    largest_dot := dot(vertices.fixed[0], direction);
-    largest_vertex := vertices.fixed[0];
-    for i: 1..vertices.count - 1 {
-        vertex := vertices.fixed[i];
+// get_support :: (vertices: *KodaVertices, direction: Vector3) -> Vector3 {
+//     largest_dot := dot(vertices.fixed[0], direction);
+//     largest_vertex := vertices.fixed[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices.fixed[i];
 
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
+//         current_dot := dot(vertex, direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
 
-    return largest_vertex;
-}
+//     return largest_vertex;
+// }
 
-get_support :: (vertices: *KodaVertices, direction: Vector3, velocity: Vector3) -> Vector3 {
-    largest_dot := dot(vertices.fixed[0], direction);
-    largest_vertex := vertices.fixed[0];
-    for i: 1..vertices.count - 1 {
-        vertex := vertices.fixed[i];
+// get_support :: (vertices: *KodaVertices, direction: Vector3, velocity: Vector3) -> Vector3 {
+//     largest_dot := dot(vertices.fixed[0], direction);
+//     largest_vertex := vertices.fixed[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices.fixed[i];
 
-        current_dot := dot(vertex, direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
-            largest_vertex = vertex;
-        }
-    }
+//         current_dot := dot(vertex, direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
 
-    if dot(velocity, velocity) > 0 {
-        for i: 0..vertices.count - 1 {
-            vertex := vertices.fixed[i] + velocity;
+//     if dot(velocity, velocity) > 0 {
+//         for i: 0..vertices.count - 1 {
+//             vertex := vertices.fixed[i] + velocity;
 
-            current_dot := dot(vertex, direction);
-            if current_dot > largest_dot {
-                largest_dot = current_dot;
-                largest_vertex = vertex;
-            }
-        }
-    }
+//             current_dot := dot(vertex, direction);
+//             if current_dot > largest_dot {
+//                 largest_dot = current_dot;
+//                 largest_vertex = vertex;
+//             }
+//         }
+//     }
 
-    return largest_vertex;
-}
+//     return largest_vertex;
+// }
 
-get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4) -> Vector3 {
-    transformed_direction := (inverse(transform) * Vector4.{direction.x, direction.y, direction.z, 0}).xyz;
+get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4, inv_transform: Matrix4) -> Vector3 {
+    transformed_direction := transform_vector(inv_transform, direction);
 
     largest_dot := dot(vertices.fixed[0], transformed_direction);
     largest_vertex := vertices.fixed[0];
@@ -217,7 +221,7 @@ get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4)
         }
     }
 
-    largest_vertex = (transform * Vector4.{largest_vertex.x, largest_vertex.y, largest_vertex.z, 1}).xyz;
+    largest_vertex = transform_point(transform, largest_vertex);
 
     return largest_vertex;
 }

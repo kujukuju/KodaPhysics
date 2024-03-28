@@ -29,6 +29,9 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
     SMALL_EPSILON :: 0.000001;
     MAX_ITERATIONS :: 64;
 
+    inv_transform1 := inverse(transpose(inverse(transform1)));
+    inv_transform2 := inverse(transpose(inverse(transform2)));
+
     simplex: Simplex;
     simplex1: Simplex;
     simplex2: Simplex;
@@ -44,17 +47,17 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
         }
     }
     simplex1.count = 2;
-    simplex1.a = get_support(v1, -search_direction, transform1);
+    simplex1.a = get_support(v1, -search_direction, transform1, inv_transform1);
     simplex2.count = 2;
-    simplex2.a = get_support(v2, search_direction, transform2);
+    simplex2.a = get_support(v2, search_direction, transform2, inv_transform2);
     simplex.count = 2;
     simplex.a = simplex2.a - simplex1.a;
 
     search_normal := cross(search_direction, direction);
     search_direction = search_normal;
     search_direction = (search_direction + direction) / 2.0;
-    simplex1.b = get_support(v1, -search_direction, transform1);
-    simplex2.b = get_support(v2, search_direction, transform2);
+    simplex1.b = get_support(v1, -search_direction, transform1, inv_transform1);
+    simplex2.b = get_support(v2, search_direction, transform2, inv_transform2);
     simplex.b = simplex2.b - simplex1.b;
 
     furthest_direction: float;
@@ -96,9 +99,9 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
                         }
                         
                         simplex1.count = 3;
-                        simplex1.c = get_support(v1, -search_direction, transform1);
+                        simplex1.c = get_support(v1, -search_direction, transform1, inv_transform1);
                         simplex2.count = 3;
-                        simplex2.c = get_support(v2, search_direction, transform2);
+                        simplex2.c = get_support(v2, search_direction, transform2, inv_transform2);
                         simplex.count = 3;
                         simplex.c = simplex2.c - simplex1.c;
 
@@ -125,9 +128,9 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
                 }
                 
                 simplex1.count = 3;
-                simplex1.c = get_support(v1, -search_direction, transform1);
+                simplex1.c = get_support(v1, -search_direction, transform1, inv_transform1);
                 simplex2.count = 3;
-                simplex2.c = get_support(v2, search_direction, transform2);
+                simplex2.c = get_support(v2, search_direction, transform2, inv_transform2);
                 simplex.count = 3;
                 simplex.c = simplex2.c - simplex1.c;
 
@@ -267,8 +270,8 @@ solve_gjk_dir :: (v1: *KodaVertices($N1), v2: *KodaVertices($N2), dir: Vector3, 
                 return .{}, .{};
             }
         }
-        a1 := get_support(v1, -search_direction, transform1);
-        a2 := get_support(v2, search_direction, transform2);
+        a1 := get_support(v1, -search_direction, transform1, inv_transform1);
+        a2 := get_support(v2, search_direction, transform2, inv_transform2);
         a := a2 - a1;
         
         #if GJK_DIR_DEBUG {
