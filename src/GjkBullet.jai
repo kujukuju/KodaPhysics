@@ -1,20 +1,14 @@
-Simplex :: struct {
-    a: Vector3;
-    b: Vector3;
-    c: Vector3;
-    d: Vector3;
 
-    count: int;
-
-#place a;
-    s: [4] Vector3 = ---;
+solve_gjk_bullet :: inline (v1: *KodaVertices, v2: *KodaVertices, transform1: [2] Matrix4 = .[Matrix4Identity, Matrix4Identity], transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
+    hit, s1, s2 := solve_gjk_bullet(v2, v1, transform2, transform1, cached_directions);
+    return hit, s2, s1;
 }
 
-solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix4Identity, transform2: Matrix4 = Matrix4Identity, cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
+solve_gjk_bullet :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix4Identity, transform2: [2] Matrix4 = .[Matrix4Identity, Matrix4Identity], cached_directions: *Simplex = null) -> bool, Simplex, Simplex {
     MAX_ITERATIONS :: 32;
 
     inv_transform1 := inverse(transpose(inverse(transform1)));
-    inv_transform2 := inverse(transpose(inverse(transform2)));
+    inv_transform2 := Matrix4.[inverse(transpose(inverse(transform2[0]))), inverse(transpose(inverse(transform2[1])))];
 
     // not actually sure I need this
     is_valid_tetrahedron :: (simplex: Simplex) -> bool {
@@ -205,22 +199,59 @@ solve_gjk :: (v1: *KodaVertices, v2: *KodaVertices, transform1: Matrix4 = Matrix
 //     return largest_vertex;
 // }
 
-get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4, inv_transform: Matrix4) -> Vector3 {
-    transformed_direction := transform_vector(inv_transform, direction);
+// get_support :: (vertices: *KodaVertices, direction: Vector3, transform: Matrix4, inv_transform: Matrix4) -> Vector3 {
+//     transformed_direction := transform_vector(inv_transform, direction);
 
-    largest_dot := dot(vertices.fixed[0], transformed_direction);
+//     largest_dot := dot(vertices.fixed[0], transformed_direction);
+//     largest_vertex := vertices.fixed[0];
+//     for i: 1..vertices.count - 1 {
+//         vertex := vertices.fixed[i];
+
+//         current_dot := dot(vertex, transformed_direction);
+//         if current_dot > largest_dot {
+//             largest_dot = current_dot;
+//             largest_vertex = vertex;
+//         }
+//     }
+
+//     largest_vertex = transform_point(transform, largest_vertex);
+
+//     return largest_vertex;
+// }
+
+get_support :: (vertices: *KodaVertices, direction: Vector3, transform: [2] Matrix4, inv_transform: [2] Matrix4) -> Vector3 {
+    transformed_direction := Vector3.[transform_vector(inv_transform[0], direction), transform_vector(inv_transform[1], direction)];
+
+    largest_dot: float;
     largest_vertex := vertices.fixed[0];
+    largest_vertex_matrix_index: int;
+
+    dots := float.[dot(largest_vertex, transformed_direction[0]), dot(largest_vertex, transformed_direction[1])];
+    if dots[0] > dots[1] {
+        largest_dot = dots[0];
+        largest_vertex_matrix_index = 0;
+    } else {
+        largest_dot = dots[1];
+        largest_vertex_matrix_index = 1;
+    }
+
     for i: 1..vertices.count - 1 {
         vertex := vertices.fixed[i];
 
-        current_dot := dot(vertex, transformed_direction);
-        if current_dot > largest_dot {
-            largest_dot = current_dot;
+        current_dots := float.[dot(vertex, transformed_direction[0]), dot(vertex, transformed_direction[1])];
+        if current_dots[0] > largest_dot {
+            largest_dot = current_dots[0];
             largest_vertex = vertex;
+            largest_vertex_matrix_index = 0;
+        }
+        if current_dots[1] > largest_dot {
+            largest_dot = current_dots[1];
+            largest_vertex = vertex;
+            largest_vertex_matrix_index = 1;
         }
     }
 
-    largest_vertex = transform_point(transform, largest_vertex);
+    largest_vertex = transform_point(transform[largest_vertex_matrix_index], largest_vertex);
 
     return largest_vertex;
 }

@@ -199,9 +199,7 @@ create_triangle_mesh :: (vertices: [] Vector3) -> KodaShape(MAX_VERTICES, MAX_VE
 //     return shape;
 // }
 
-#scope_file
-
-detect_convex_hull :: (vertices: [] Vector3, indices: [] int) -> bool {
+detect_convex_hull :: (vertices: [] Vector3, indices: [] $I) -> bool {
     // 1. each edge must have 2 triangles
     // 2. the dot product of the normal of each 2 adjacent triangles must be negative (pointing away from each other)
 
@@ -327,6 +325,8 @@ detect_convex_hull :: (vertices: [] Vector3, indices: [] int) -> bool {
 
     return true;
 }
+
+#scope_file
 
 #run {
     shape: KodaShape(0, 0);

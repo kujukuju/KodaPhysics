@@ -1,3 +1,6 @@
+
+COLLISION_ALL :: 0xffffffffffffffff;
+
 KodaBody :: struct {
     type: KodaBodyType;
     shapes: [..] KodaShape;
@@ -19,7 +22,7 @@ KodaBody :: struct {
     step_height: float = 0.4;
 
     sensor: bool = false;
-    // collision_group: u64 = 0xffffffffffffffff;
+    collision_group: u64 = COLLISION_ALL;
 
     proxy: int = -1;
 }
@@ -62,6 +65,91 @@ create_body :: (shapes: [] KodaShape, type: KodaBodyType) -> *KodaBody {
     return body;
 }
 
+load_bodies :: (path: string, $fallback: () -> [] *KodaBody) -> [] *KodaBody {
+    file, loaded := read_entire_file(path, log_errors = false);
+    if !loaded {
+        bodies := fallback();
+        save_bodies(bodies, path);
+
+        return bodies;
+    }
+
+    view: [] u8;
+    view.data = file.data;
+    view.count = file.count;
+
+    bodies_bytes: [] u8;
+    bodies_bytes.data = file.data + size_of(SerializedBodyHash);
+    bodies_bytes.count = file.count - size_of(SerializedBodyHash);
+
+    cache_hash := get_hash(bodies_bytes);
+    cache_size := bodies_bytes.count;
+
+    hash := deserialize_body_hash(view);
+    if hash.hash == cache_hash && hash.size == cache_size {
+        print("Skipping body file read. Reading serialized.\n");
+
+        bodies: [..] *KodaBody;
+        offset := 0;
+        while offset < bodies_bytes.count {
+            body_bytes_count: int;
+            memcpy(*body_bytes_count, bodies_bytes.data + offset, size_of(int));
+
+            offset += size_of(int);
+
+            body_view: [] u8;
+            body_view.data = bodies_bytes.data + offset;
+            body_view.count = body_bytes_count;
+
+            offset += body_bytes_count;
+
+            body := deserialize_body(body_view);
+            array_add(*bodies, body);
+        }
+
+        return bodies;
+    }
+
+    return .[];
+}
+
+save_bodies :: (bodies: [] *KodaBody, path: string) {
+    bytes: [..] u8;
+    defer array_free(bytes);
+
+    array_reserve(*bytes, size_of(SerializedBodyHash));
+    
+    body_hash: SerializedBodyHash;
+    memcpy(bytes.data, *body_hash, size_of(SerializedBodyHash));
+    bytes.count += size_of(SerializedBodyHash);
+
+    for body: bodies {
+        body_bytes := serialize_body(body);
+        defer array_free(body_bytes);
+
+        body_bytes_count: int = body_bytes.count;
+        array_reserve(*bytes, bytes.count + size_of(int) + body_bytes.count);
+        memcpy(bytes.data + bytes.count, *body_bytes_count, size_of(int));
+        bytes.count += size_of(int);
+        memcpy(bytes.data + bytes.count, body_bytes.data, body_bytes_count);
+        bytes.count += body_bytes_count;
+    }
+
+    bodies_bytes: [] u8;
+    bodies_bytes.data = bytes.data + size_of(SerializedBodyHash);
+    bodies_bytes.count = bytes.count - size_of(SerializedBodyHash);
+
+    cache_hash := get_hash(bodies_bytes);
+    cache_size := bodies_bytes.count;
+
+    body_hash.hash = cache_hash;
+    body_hash.size = cache_size;
+
+    memcpy(bytes.data, *body_hash, size_of(SerializedBodyHash));
+
+    write_entire_file(path, bytes.data, bytes.count);
+}
+
 load_body :: (path: string, $fallback: () -> *KodaBody) -> *KodaBody {
     file, loaded := read_entire_file(path, log_errors = false);
     if !loaded {
@@ -95,9 +183,6 @@ load_body :: (path: string, $fallback: () -> *KodaBody) -> *KodaBody {
 }
 
 save_body :: (body: KodaBody, path: string) {
-    serialized: SerializedKodaBody;
-    serialized.body = body;
-    
     bytes: [..] u8;
     defer array_free(bytes);
 
@@ -190,6 +275,9 @@ serialize_body :: (body: KodaBody) -> [..] u8 {
     array_ordered_remove_by_value(*member_names, "sensor");
     serializer_write(*bytes, body.sensor);
 
+    array_ordered_remove_by_value(*member_names, "collision_group");
+    serializer_write(*bytes, body.collision_group);
+
     array_ordered_remove_by_value(*member_names, "proxy");
     // nothing
 
@@ -274,6 +362,9 @@ deserialize_body :: (bytes: [] u8) -> *KodaBody {
 
     array_ordered_remove_by_value(*member_names, "sensor");
     offset = serializer_read(bytes, *body.sensor, offset);
+
+    array_ordered_remove_by_value(*member_names, "collision_group");
+    offset = serializer_read(bytes, *body.collision_group, offset);
 
     array_ordered_remove_by_value(*member_names, "proxy");
     body.proxy = create_proxy(*tree_bodies, get_world_aabb(body), body);
