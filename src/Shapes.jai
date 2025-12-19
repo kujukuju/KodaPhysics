@@ -93,7 +93,7 @@ create_convex_hull :: (vertices: [$N] Vector3) -> KodaShape(N, 0) {
     return shape;
 }
 
-create_triangle_mesh :: (vertices: [] Vector3, indices: [] int) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
+create_triangle_mesh :: (vertices: [] Vector3, indices: [] $T/int) -> KodaShape(MAX_VERTICES, MAX_VERTICES) {
     shape: KodaShape;
     shape.type = .TriangleMesh;
     shape.mesh.triangles = create_bounding_tree(Triangle3);

@@ -1,3 +1,4 @@
+
 Simplex :: struct {
     a: Vector3;
     b: Vector3;

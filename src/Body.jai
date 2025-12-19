@@ -1,5 +1,5 @@
 
-COLLISION_ALL :: 0xffffffffffffffff;
+KODA_COLLISION_ALL: s32 : 0xffffffff;
 
 KodaBody :: struct {
     type: KodaBodyType;
@@ -22,7 +22,7 @@ KodaBody :: struct {
     step_height: float = 0.4;
 
     sensor: bool = false;
-    collision_group: u64 = COLLISION_ALL;
+    collision_group: s32 = KODA_COLLISION_ALL;
 
     proxy: int = -1;
 }

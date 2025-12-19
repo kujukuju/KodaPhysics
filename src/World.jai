@@ -252,7 +252,7 @@ step_physics :: (dt: float, a: *KodaBody, potential_collisions: *[..] *KodaBody,
     }
 }
 
-get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool = true, collision_group: u64 = COLLISION_ALL) -> Vector3, Vector3, bool {
+get_line_intersection :: (line: Line3, $sensor: bool = false, $static_only: bool = true, collision_group: s32 = KODA_COLLISION_ALL) -> Vector3, Vector3, bool {
     aabb: AABB3 = .{min(line.p1, line.p2), max(line.p1, line.p2)};
 
     search_direction := normalize(line.p1 - line.p2);
